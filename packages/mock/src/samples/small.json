@@ -1,0 +1,47 @@
+{
+  "contract": "gantt-roadmap/1",
+  "roadmap": { "id": "r1", "name": "Platform migration", "version": 12, "timeZone": "Europe/Zurich",
+               "start": "2026-11-02", "defaultCalendar": "cal1", "statusDate": "2026-11-11" },
+  "calendars": [
+    { "id": "cal1", "name": "Standard", "workingDays": [1, 2, 3, 4, 5], "hoursPerDay": 8,
+      "holidays": ["2026-12-24", "2026-12-25", "2026-12-31", "2027-01-01"] }
+  ],
+  "tasks": [
+    { "id": "t1", "name": "Planning", "type": "summary", "kind": "initiative", "parent": null },
+    { "id": "t2", "name": "Requirements", "type": "task", "kind": "use-case", "parent": "t1",
+      "start": "2026-11-02", "duration": 10, "end": "2026-11-13", "progress": 0.4, "owner": "u1",
+      "constraint": { "type": "SNET", "date": "2026-11-02" }, "deadline": "2026-11-30" },
+    { "id": "t3", "name": "Architecture review", "type": "task", "parent": "t1", "start": "2026-11-09", "duration": 5, "progress": 0.2 },
+    { "id": "t4", "name": "Sign-off", "type": "milestone", "parent": "t1", "start": "2026-11-16", "duration": 0 },
+
+    { "id": "t5", "name": "Build", "type": "summary", "kind": "initiative", "parent": null },
+    { "id": "t6", "name": "Core platform", "type": "summary", "kind": "application", "parent": "t5" },
+    { "id": "t7", "name": "Data model", "type": "task", "parent": "t6", "start": "2026-11-16", "duration": 8, "progress": 0.1 },
+    { "id": "t8", "name": "API layer", "type": "task", "parent": "t6", "start": "2026-11-26", "duration": 12 },
+    { "id": "t9", "name": "Auth integration", "type": "task", "parent": "t6", "start": "2026-11-30", "duration": 6 },
+    { "id": "t10", "name": "Crew Atlas", "type": "summary", "kind": "crew", "lane": true, "parent": "t5" },
+    { "id": "t11", "name": "Search", "type": "task", "kind": "deliverable", "parent": "t10", "start": "2026-11-16", "duration": 7 },
+    { "id": "t12", "name": "Indexing", "type": "task", "kind": "deliverable", "parent": "t10", "start": "2026-11-20", "duration": 6 },
+    { "id": "t13", "name": "Ranking", "type": "task", "kind": "deliverable", "parent": "t10", "start": "2026-11-30", "duration": 8 },
+    { "id": "t14", "name": "Caching", "type": "task", "kind": "deliverable", "parent": "t10", "start": "2026-12-10", "duration": 5 },
+
+    { "id": "t15", "name": "Rollout", "type": "summary", "kind": "initiative", "parent": null },
+    { "id": "t16", "name": "Pilot", "type": "task", "parent": "t15", "start": "2026-12-14", "duration": 5 },
+    { "id": "t17", "name": "Training", "type": "task", "parent": "t15", "start": "2026-12-16", "duration": 8 },
+    { "id": "t18", "name": "Go-live", "type": "milestone", "parent": "t15", "start": "2027-01-11", "duration": 0, "deadline": "2027-01-15" },
+    { "id": "t19", "name": "Hypercare", "type": "task", "parent": "t15", "start": "2027-01-11", "duration": 10 },
+    { "id": "t20", "name": "Decommission legacy", "type": "task", "parent": null }
+  ],
+  "links": [
+    { "id": "l1", "source": "t2", "target": "t4", "type": "FS", "kind": "delivery" },
+    { "id": "l2", "source": "t3", "target": "t4", "type": "FS" },
+    { "id": "l3", "source": "t4", "target": "t7", "type": "FS" },
+    { "id": "l4", "source": "t7", "target": "t8", "type": "FS" },
+    { "id": "l5", "source": "t8", "target": "t9", "type": "SS", "lag": 2 },
+    { "id": "l6", "source": "t11", "target": "t13", "type": "FS" },
+    { "id": "l7", "source": "t9", "target": "t16", "type": "FS" },
+    { "id": "l8", "source": "t16", "target": "t17", "type": "SS", "lag": 2 },
+    { "id": "l9", "source": "t17", "target": "t18", "type": "FS", "kind": "delivery" },
+    { "id": "l10", "source": "t18", "target": "t19", "type": "SS" }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "gantt-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @gantt/demo",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "generate": "node --experimental-strip-types packages/mock/src/cli.ts",
+    "verify": "npm run check:boundaries && npm run typecheck && npm test",
+    "bench": "node scripts/bench.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "jsdom": "^26.1.0",
+    "playwright-core": "^1.55.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.0"
+  }
+}

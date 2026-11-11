@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; --bg: #f2f4f7; --fg: #1c2430; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0d1016; --fg: #e6e9ef; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+.demo { padding: 10px 16px; }
+.demo-bar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; height: 50px; }
+.demo-bar h1 { font-size: 16px; margin: 0; }
+.demo-meta { opacity: .7; font-size: 12px; }
+.demo-error { padding: 20px; border: 1px solid #b42318; border-radius: 8px; }
+.demo-host-note { background: #7c5cd622; border-left: 3px solid #7c5cd6; padding: 6px 8px; margin-bottom: 10px; border-radius: 4px; font-size: 12px; }
