@@ -1,6 +1,6 @@
-import { StrictMode, useMemo, useState } from 'react';
+import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Gantt, type GanttKinds } from '@gantt/react';
+import { Gantt, type GanttHandle, type GanttKinds, type GanttOperation } from '@gantt/react';
 import { generate, loadMock } from '@gantt/mock';
 import small from '../../../packages/mock/src/samples/small.json';
 import './demo.css';
@@ -24,6 +24,12 @@ function App() {
   const [sample, setSample] = useState<SampleId>('small');
   const [theme, setTheme] = useState<'light' | 'dark' | undefined>();
   const [dock, setDock] = useState<'right' | 'bottom'>('right');
+  const [lockZoom, setLockZoom] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+  const ref = useRef<GanttHandle>(null);
+  const push = (line: string) => setLog((l) => [line, ...l].slice(0, 8));
+  useEffect(() => { (window as unknown as { gantt: unknown }).gantt = ref; });
+  const describe = (op: GanttOperation) => op.type + ('id' in op ? ` ${op.id}` : op.type === 'zoom.set' ? ` ${op.zoom}` : op.type === 'selection.set' ? ` (${op.selection.length})` : '');
   const result = useMemo(() => {
     const t0 = performance.now();
     const input = sample === 'small' ? small
@@ -46,11 +52,18 @@ function App() {
           <option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
         <label>Details <select value={dock} onChange={(e) => setDock(e.target.value as typeof dock)}>
           <option value="right">Right</option><option value="bottom">Bottom</option></select></label>
+        <label><input type="checkbox" checked={lockZoom} onChange={(e) => setLockZoom(e.target.checked)} /> Host refuses zoom</label>
         <span className="demo-meta">{result.r.ok ? `${result.r.doc.tasks.length} tasks, ${result.r.doc.links.length} links · validated in ${result.ms} ms` : 'Refused'}</span>
       </header>
       {result.r.ok
-        ? <Gantt data={result.r.doc} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 70px)"
-            markers={[{ date: '2026-12-18', label: 'Code freeze' }]} />
+        ? <>
+          <Gantt ref={ref} data={result.r.doc} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 110px)"
+            markers={[{ date: '2026-12-18', label: 'Code freeze' }]} userId="demo-user"
+            onBeforeOperation={(op) => (lockZoom && op.type === 'zoom.set' ? 'Zoom is locked by the host' : undefined)}
+            onOperation={(r, ctx) => push(`✓ ${ctx.source}: ${describe(r.operation)}`)}
+            onOperationRefused={(r) => push(`✗ ${describe(r.operation)}: ${r.reason}`)} />
+          <div className="demo-log" aria-label="Operations log" data-testid="oplog">{log.map((l, i) => <div key={i}>{l}</div>)}</div>
+        </>
         : <div className="demo-error" role="alert"><h2>This file was refused</h2><ul>{result.r.errors.map((e) => <li key={e.path}><code>{e.path}</code>: {e.message}</li>)}</ul></div>}
     </div>
   );

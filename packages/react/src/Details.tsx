@@ -62,7 +62,7 @@ export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds
       </>;
     }
   }
-  return <aside className="gx-details" aria-label="Details">{body}</aside>;
+  return <aside className="gx-details" aria-label="Details (F6 to move between chart and details)" tabIndex={-1}>{body}</aside>;
 });
 
 function hiddenReason(t: Task, m: Model) {
@@ -190,7 +190,7 @@ function RoadmapSummary({ model, locale }: { model: Model; locale?: string }) {
       <Field label="Unscheduled">{unscheduled}</Field>
       <Field label="Open proposals">{model.doc.proposals?.length ?? 0}</Field>
     </dl></section>
-    <p className="gx-muted gx-hint">Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today.</p>
+    <p className="gx-muted gx-hint">Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.</p>
   </div>;
 }
 

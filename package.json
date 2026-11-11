@@ -12,13 +12,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "generate": "node --experimental-strip-types packages/mock/src/cli.ts",
-    "verify": "npm run check:boundaries && npm run typecheck && npm test",
-    "bench": "node scripts/bench.mjs"
+    "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run e2e",
+    "bench": "node scripts/bench.mjs",
+    "e2e": "node scripts/e2e.mjs"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.5.0",
+    "axe-core": "^4.10.3",
     "jsdom": "^26.1.0",
     "playwright-core": "^1.55.0",
     "typescript": "~5.8.3",

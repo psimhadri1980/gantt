@@ -1,8 +1,9 @@
-import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
+import { forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  barIndex, buildModel, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS,
-  type Model, type RowLayout, type Scale, type SelectionTarget,
+  applyDataOperation, barIndex, buildModel, OperationPipeline, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS,
+  type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
+  type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
 } from '@gantt/state';
 import { fromDay, type DayNum } from '@gantt/engine';
 import { placeOffThread } from './engineClient.ts';
@@ -26,6 +27,40 @@ export interface GanttProps {
   height?: number | string;
   emptyState?: ReactNode;
   toolbar?: ComponentType<ToolbarProps> | false;
+
+  // Operation API (H3). Every change, including the user's own clicks and keys, goes through these.
+  /** Interception: return false or a reason to refuse an operation before it happens. May return a promise. */
+  onBeforeOperation?: OperationHooks['beforeOperation'];
+  /** Authorisation hook before every data operation (L5). Fails closed if it throws. */
+  authorize?: OperationHooks['authorize'];
+  /** Listening: every applied operation, with the operations that undo it for data changes. */
+  onOperation?: OperationHooks['operation'];
+  /** An operation was refused (by interception, authorisation or validation). */
+  onOperationRefused?: OperationHooks['refused'];
+  /** An operation was refused by the authorisation hook (plan event `accessDenied`). */
+  onAccessDenied?: (e: { operation: GanttOperation; reason: string }) => void;
+  /** The roadmap changed through a data operation; carries the new document. */
+  onDataChanged?: (data: RoadmapDocument, operation: DataOperation) => void;
+  /** The current user's id, recorded on operations. */
+  userId?: string;
+}
+
+/** Imperative handle (H3): `const ref = useRef<GanttHandle>(null); <Gantt ref={ref} … />`. */
+export interface GanttHandle {
+  run: (op: GanttOperation) => Promise<OperationResult>;
+  getData: () => RoadmapDocument;
+  getSelection: () => SelectionTarget[];
+  scrollToTask: (id: string) => void;
+  scrollToToday: () => void;
+  fit: () => void;
+}
+
+interface ViewBridge {
+  apply: (op: ViewOperation) => void;
+  getSelection: () => SelectionTarget[];
+  scrollToTask: (id: string) => void;
+  scrollToToday: () => void;
+  fit: () => void;
 }
 
 export interface ToolbarProps { zoom: string; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void }
@@ -54,28 +89,66 @@ interface Ctx { model: Model; kinds?: GanttKinds; locale?: string; laneOpen: Rea
  * Builds the model in its own task after the shell has painted, so no single main-thread task carries
  * both the model build and the first render (budget: no task over 100 ms). Shows the loading state meanwhile (F13).
  */
-export function Gantt(props: GanttProps) {
+export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(props, ref) {
+  // The working document: starts as props.data, changes through data operations, resets when props.data changes.
+  const [working, setWorking] = useState<{ from: RoadmapDocument; doc: RoadmapDocument }>({ from: props.data, doc: props.data });
+  const doc = working.from === props.data ? working.doc : props.data;
+  const docRef = useRef(doc); docRef.current = doc;
+  const propsRef = useRef(props); propsRef.current = props;
+  const viewRef = useRef<ViewBridge | null>(null);
+
+  const pipeline = useMemo(() => new OperationPipeline(
+    () => {
+      const p = propsRef.current;
+      return {
+        beforeOperation: p.onBeforeOperation, authorize: p.authorize, operation: p.onOperation,
+        refused: (r, ctx) => { p.onOperationRefused?.(r, ctx); if (r.stage === 'authorization') p.onAccessDenied?.({ operation: r.operation, reason: r.reason }); },
+      };
+    },
+    (op) => {
+      const r = applyDataOperation(docRef.current, op);
+      if ('error' in r) return r;
+      docRef.current = r.doc;
+      const from = propsRef.current.data;
+      setWorking({ from, doc: r.doc });
+      propsRef.current.onDataChanged?.(r.doc, op);
+      return { inverse: r.inverse };
+    },
+    (op) => { if (!viewRef.current) throw new Error('the chart is still loading'); viewRef.current.apply(op); },
+  ), []);
+  const run = useCallback((op: GanttOperation, source: OperationContext['source'] = 'api') =>
+    pipeline.run(op, { source, by: propsRef.current.userId }), [pipeline]);
+
+  useImperativeHandle(ref, () => ({
+    run: (op) => run(op, 'api'),
+    getData: () => docRef.current,
+    getSelection: () => viewRef.current?.getSelection() ?? [],
+    scrollToTask: (id) => viewRef.current?.scrollToTask(id),
+    scrollToToday: () => viewRef.current?.scrollToToday(),
+    fit: () => viewRef.current?.fit(),
+  }), [run]);
+
   const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(null);
   useEffect(() => {
-    if (built?.data === props.data) return;
+    if (built?.data === doc) return;
     // The engine places tasks in a worker; the main thread only builds the tree indexes and renders (as a transition).
-    const data = props.data;
     let cancelled = false;
-    placeOffThread(data).then((placement) => {
+    placeOffThread(doc).then((placement) => {
       if (cancelled) return;
-      setTimeout(() => { if (!cancelled) { const model = buildModel(data, placement); startTransition(() => setBuilt({ data, model })); } }, 0);
+      setTimeout(() => { if (!cancelled) { const model = buildModel(doc, placement); startTransition(() => setBuilt({ data: doc, model })); } }, 0);
     });
     return () => { cancelled = true; };
-  }, [props.data, built]);
-  if (!built || built.data !== props.data) {
+  }, [doc, built]);
+  // While a changed document is being placed, keep showing the previous one (no loading flash).
+  if (!built) {
     const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
     return <div className="gx-root" {...themeAttr} style={{ height: props.height ?? 600 }} aria-busy="true"><div className="gx-empty">Loading roadmap…</div></div>;
   }
-  return <GanttView {...props} model={built.model} />;
-}
+  return <GanttView {...props} data={built.data} model={built.model} run={run} viewRef={viewRef} />;
+});
 
-function GanttView(props: GanttProps & { model: Model }) {
-  const { data, kinds, locale, detailsPanel = 'right', height = 600, model } = props;
+function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null> }) {
+  const { data, kinds, locale, detailsPanel = 'right', height = 600, model, run } = props;
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [laneOpen, setLaneOpen] = useState<Set<string>>(() => new Set());
   const rows = useMemo(() => layoutRows(model, collapsed, laneOpen), [model, collapsed, laneOpen]);
@@ -100,10 +173,11 @@ function GanttView(props: GanttProps & { model: Model }) {
   const selection = props.selection ?? selState;
   const selKeys = useMemo(() => new Set(selection.map(targetKey)), [selection]);
   const onSelRef = useRef(props.onSelectionChanged); onSelRef.current = props.onSelectionChanged;
-  const select = useCallback((sel: SelectionTarget[]) => {
+  const applySelection = useCallback((sel: SelectionTarget[]) => {
     setSelState(sel);
     onSelRef.current?.({ selection: sel, primary: sel[sel.length - 1] });
   }, []);
+  const select = useCallback((sel: SelectionTarget[]) => { void run({ type: 'selection.set', selection: sel }, 'user'); }, [run]);
   const linkById = useMemo(() => new Map(data.links.map((l) => [l.id, l])), [data.links]);
   // Tasks marked because a selected connector joins them (F15).
   const linkMarked = useMemo(() => {
@@ -114,10 +188,11 @@ function GanttView(props: GanttProps & { model: Model }) {
 
   // Scroll position, quantised to blocks and day chunks.
   const chartRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ b0: 0, b1: 1, c0: 0, c1: 1, h: 600 });
-  const geom = useRef({ rows, scale, blocksLen: blocks.length }); geom.current = { rows, scale, blocksLen: blocks.length };
+  const geom = useRef({ rows, scale, blocksLen: blocks.length, zoom }); geom.current = { rows, scale, blocksLen: blocks.length, zoom };
   // Viewport size comes from the ResizeObserver, so the scroll handler only reads scroll offsets and never forces layout.
   const size = useRef({ w: 1000, h: 600 });
   const measure = useCallback((top?: number, left?: number) => {
@@ -157,11 +232,12 @@ function GanttView(props: GanttProps & { model: Model }) {
   const pendingAnchor = useRef<{ day: number; px: number } | null>(null);
   const gesture = useRef<{ from: number; px: number; timer: number } | null>(null);
   const gesture_active = () => gesture.current !== null;
+  const applyZoom = useCallback((z: string) => { startTransition(() => setZoomState(z)); onZoomRef.current?.(z); }, []);
   const setZoom = useCallback((z: string, anchorPx?: number) => {
     const el = chartRef.current, sc = geom.current.scale;
     if (el && !pendingAnchor.current) { const px = anchorPx ?? el.clientWidth / 2; pendingAnchor.current = { day: (el.scrollLeft + px) / sc.pxPerDay + sc.origin, px }; }
-    startTransition(() => setZoomState(z)); onZoomRef.current?.(z);
-  }, []);
+    void run({ type: 'zoom.set', zoom: z }, 'user').then((r) => { if (!r.ok) { pendingAnchor.current = null; zoomRef.current = geom.current.zoom; } });
+  }, [run]);
   useLayoutEffect(() => {
     const a = pendingAnchor.current, el = chartRef.current;
     if (a && el) { el.scrollLeft = (a.day - scale.origin) * scale.pxPerDay - a.px; pendingAnchor.current = null; }
@@ -170,9 +246,10 @@ function GanttView(props: GanttProps & { model: Model }) {
     const el = chartRef.current; if (!el || !span) return;
     const days = span.end - span.start + 1;
     const best = [...ZOOM_LEVELS].reverse().find((z) => days * z.pxPerDay <= el.clientWidth - 40) ?? ZOOM_LEVELS[0]!;
-    setZoomState(best.id); onZoomRef.current?.(best.id);
-    requestAnimationFrame(() => { el.scrollLeft = (span.start - origin) * best.pxPerDay - 20; });
-  }, [span, origin]);
+    void run({ type: 'zoom.set', zoom: best.id }, 'user').then((r) => {
+      if (r.ok) requestAnimationFrame(() => { el.scrollLeft = (span.start - origin) * best.pxPerDay - 20; });
+    });
+  }, [span, origin, run]);
 
   useEffect(() => { requestAnimationFrame(() => scrollToDay(todayDay, false)); /* once per data */ }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -218,8 +295,11 @@ function GanttView(props: GanttProps & { model: Model }) {
     else if (r.top + r.height > el.scrollTop + el.clientHeight) el.scrollTop = r.top + r.height - el.clientHeight;
   }, []);
   const [announce, setAnnounce] = useState('');
-  const toggle = useCallback((id: string) => setCollapsed((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
-  const toggleLane = useCallback((id: string) => setLaneOpen((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
+  const treeRef = useRef({ collapsed, laneOpen }); treeRef.current = { collapsed, laneOpen };
+  const toggle = useCallback((id: string) => { void run({ type: treeRef.current.collapsed.has(id) ? 'row.expand' : 'row.collapse', id }, 'user'); }, [run]);
+  const toggleLane = useCallback((id: string) => { void run({ type: treeRef.current.laneOpen.has(id) ? 'lane.close' : 'lane.open', id }, 'user'); }, [run]);
+  const setIn = (set: React.Dispatch<React.SetStateAction<Set<string>>>, id: string, on: boolean) =>
+    set((c) => { if (c.has(id) === on) return c; const n = new Set(c); on ? n.add(id) : n.delete(id); return n; });
   const selRef = useRef({ selection, selKeys, model }); selRef.current = { selection, selKeys, model };
   const doSelect = useCallback((t: SelectionTarget, additive: boolean) => {
     const { selection: cur, selKeys: keys, model: m } = selRef.current;
@@ -233,6 +313,38 @@ function GanttView(props: GanttProps & { model: Model }) {
     select: doSelect, focus: (row, bar) => setFocus((f) => (f.row === row && f.bar === bar ? f : { row, bar })), toggle, toggleLane,
     tip: (x, y, content) => tipRef.current(content == null ? null : { x, y, content }),
   }), [doSelect, toggle, toggleLane]);
+  const scrollToTask = useCallback((id: string) => {
+    // Open collapsed ancestors (and a lane holding the task), then scroll to the task's row.
+    const m = selRef.current.model;
+    for (let p = m.tasks.get(id)?.parent; p; p = m.tasks.get(p)?.parent ?? null) {
+      if (m.tasks.get(p)?.lane) continue;
+      setIn(setCollapsed, p, false);
+    }
+    requestAnimationFrame(() => {
+      const rs = geom.current.rows; const i = rs.findIndex((r) => r.taskId === id || r.bars.some((b) => b.taskId === id));
+      if (i >= 0) { ensureVisible(i); const pl = m.placement.byId.get(id); if (pl?.scheduled) scrollToDay(pl.start!); }
+    });
+  }, [ensureVisible, scrollToDay]);
+  const bridge = useRef<ViewBridge | null>(null);
+  bridge.current = {
+    apply: (op) => {
+      switch (op.type) {
+        case 'row.expand': setIn(setCollapsed, op.id, false); break;
+        case 'row.collapse': setIn(setCollapsed, op.id, true); break;
+        case 'lane.open': setIn(setLaneOpen, op.id, true); break;
+        case 'lane.close': setIn(setLaneOpen, op.id, false); break;
+        case 'selection.set': applySelection(op.selection); break;
+        case 'zoom.set': if (!ZOOM_LEVELS.some((z) => z.id === op.zoom)) throw new Error(`unknown zoom level "${op.zoom}"`); applyZoom(op.zoom); break;
+      }
+    },
+    getSelection: () => selRef.current.selection,
+    scrollToTask, scrollToToday, fit,
+  };
+  useLayoutEffect(() => {
+    props.viewRef.current = { apply: (op) => bridge.current!.apply(op), getSelection: () => bridge.current!.getSelection(),
+      scrollToTask: (id) => bridge.current!.scrollToTask(id), scrollToToday: () => bridge.current!.scrollToToday(), fit: () => bridge.current!.fit() };
+    return () => { props.viewRef.current = null; };
+  }, [props.viewRef]);
   const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked }), [model, kinds, locale, laneOpen, selKeys, linkMarked]);
 
   const targetFor = (r: RowLayout, bar: number): SelectionTarget =>
@@ -263,6 +375,12 @@ function GanttView(props: GanttProps & { model: Model }) {
       case '+': case '=': setZoom(ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, ZOOM_LEVELS.indexOf(level) + 1)]!.id); break;
       case '-': setZoom(ZOOM_LEVELS[Math.max(0, ZOOM_LEVELS.indexOf(level) - 1)]!.id); break;
       case 't': scrollToToday(); break;
+      case 'F6': { // move focus to the details panel (and back with F6 there)
+        const panel = rootRef.current?.querySelector<HTMLElement>('.gx-details');
+        const first = panel?.querySelector<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])');
+        (first ?? panel)?.focus();
+        break;
+      }
       default: return;
     }
     e.preventDefault();
@@ -315,7 +433,12 @@ function GanttView(props: GanttProps & { model: Model }) {
   }
 
   return (
-    <div className={`gx-root gx-details-${detailsPanel || 'none'}`} {...themeAttr} style={{ height }}>
+    <div ref={rootRef} className={`gx-root gx-details-${detailsPanel || 'none'}`} {...themeAttr} style={{ height }}
+      onKeyDown={(e) => {
+        if (e.key !== 'F6' || !(e.target as HTMLElement).closest('.gx-details')) return;
+        e.preventDefault();
+        gridBodyRef.current?.querySelector<HTMLElement>('[role="row"][tabindex="0"]')?.focus();
+      }}>
       {Toolbar && (
         <div className="gx-toolbar-row">
           <Toolbar zoom={zoom} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit} />
@@ -326,19 +449,20 @@ function GanttView(props: GanttProps & { model: Model }) {
         <div className="gx-panes">
           {!gridHidden && (
             <div className="gx-grid" style={{ width: gridW }}>
-              <div className="gx-grid-head" role="row">
+              <div className="gx-grid-inner" role="treegrid" aria-label={data.roadmap.name} aria-rowcount={rows.length + 1} aria-multiselectable="true">
+              <div className="gx-grid-head" role="row" aria-rowindex={1}>
                 <span className="gx-col-wbs" role="columnheader">WBS</span>
                 <span className="gx-col-name" role="columnheader">Name</span>
                 <span className="gx-col-date" role="columnheader">Start</span>
                 <span className="gx-col-dur" role="columnheader">Days</span>
               </div>
-              <div className="gx-grid-body" ref={gridBodyRef} role="treegrid" aria-label={data.roadmap.name} aria-rowcount={rows.length}
-                aria-multiselectable="true" onKeyDown={onKeyDown}
+              <div className="gx-grid-body" ref={gridBodyRef} role="rowgroup" onKeyDown={onKeyDown}
                 onWheel={(e) => { if (chartRef.current) chartRef.current.scrollTop += e.deltaY; }}>
                 <div style={{ height: H, position: 'relative' }}>
                   {visibleBlocks.map((b) => <GridBlock key={b.index} block={b} ctx={ctx} api={api}
                     focusRow={focus.row >= b.start && focus.row < b.start + BLOCK ? focus.row : -1} />)}
                 </div>
+              </div>
               </div>
               <div className="gx-splitter" role="separator" aria-orientation="vertical" aria-label="Resize grid" tabIndex={0}
                 aria-valuenow={gridW} aria-valuemin={GRID_MIN} aria-valuemax={900}
@@ -353,7 +477,7 @@ function GanttView(props: GanttProps & { model: Model }) {
                 <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} />
               </div>
             </div>
-            <div className="gx-chart" ref={chartRef} onScroll={onScroll}
+            <div className="gx-chart" ref={chartRef} onScroll={onScroll} tabIndex={0} role="region" aria-label="Timeline: scroll with the arrow keys"
               onPointerDown={(e) => { if ((e.target as HTMLElement).closest('.gx-bar,.gx-link-hit')) return; const el = chartRef.current!; pan.current = { x: e.clientX, y: e.clientY, l: el.scrollLeft, t: el.scrollTop, moved: false }; }}
               onPointerMove={(e) => { const p = pan.current; if (!p) return; const dx = e.clientX - p.x, dy = e.clientY - p.y; if (Math.abs(dx) + Math.abs(dy) > 4) p.moved = true; if (p.moved) { chartRef.current!.scrollLeft = p.l - dx; chartRef.current!.scrollTop = p.t - dy; } }}
               onPointerUp={() => { const p = pan.current; pan.current = null; if (p && !p.moved) select([]); }}
@@ -396,7 +520,7 @@ const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block
     const selected = selKeys.has(`row:${r.taskId}`) || (!r.lane && selKeys.has(`bar:${r.taskId}`));
     const kind = t.kind ? kinds?.rows?.[t.kind] : undefined;
     return (
-      <div key={r.taskId} data-row={i} role="row" aria-level={r.depth + 1} aria-rowindex={i + 1}
+      <div key={r.taskId} data-row={i} role="row" aria-level={r.depth + 1} aria-rowindex={i + 2}
         aria-expanded={r.hasChildren && !r.lane ? r.expanded : undefined} aria-selected={selected}
         tabIndex={i === focusRow || (focusRow < 0 && i === 0) ? 0 : -1}
         className={`gx-row${selected ? ' gx-sel' : ''}${linkMarked.has(r.taskId) ? ' gx-marked' : ''}${i === focusRow ? ' gx-focus' : ''}${r.lane ? ' gx-lane' : ''}`}

@@ -7,3 +7,4 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 14px system-ui,
 .demo-meta { opacity: .7; font-size: 12px; }
 .demo-error { padding: 20px; border: 1px solid #b42318; border-radius: 8px; }
 .demo-host-note { background: #7c5cd622; border-left: 3px solid #7c5cd6; padding: 6px 8px; margin-bottom: 10px; border-radius: 4px; font-size: 12px; }
+.demo-log { height: 32px; overflow: hidden; font: 12px ui-monospace, monospace; opacity: .75; padding-top: 6px; display: flex; gap: 18px; white-space: nowrap; }

@@ -1,9 +1,9 @@
 /* All selectors are scoped under .gx-root; no global selectors, no dependence on host resets (ADR-001, cond. 3). */
 .gx-root {
   --gx-bg: #ffffff; --gx-surface: #f7f8fa; --gx-border: #e3e6eb; --gx-grid: #eef0f3; --gx-text: #1c2430; --gx-muted: #5e6a7a;
-  --gx-nonwork: #f3f4f7; --gx-sel: #e3edff; --gx-sel-strong: #2f6fe4; --gx-marked: #fff4d6;
-  --gx-task: #4f86ec; --gx-task-progress: #1f55c2; --gx-summary: #3b4656; --gx-milestone: #c2410c;
-  --gx-link: #8994a5; --gx-link-sel: #2f6fe4; --gx-today: #e0453a; --gx-marker: #7c5cd6; --gx-warn: #b42318; --gx-warn-bg: #fde8e7;
+  --gx-nonwork: #f3f4f7; --gx-sel: #e3edff; --gx-sel-strong: #1d55c0; --gx-marked: #fff4d6;
+  --gx-task: #2f68d8; --gx-task-progress: #173f94; --gx-summary: #3b4656; --gx-milestone: #c2410c;
+  --gx-link: #8994a5; --gx-link-sel: #2f6fe4; --gx-today: #c42a1f; --gx-marker: #6a48c9; --gx-warn: #b42318; --gx-warn-bg: #fde8e7;
   --gx-bar-text: #ffffff; --gx-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; --gx-font-size: 13px; --gx-radius: 4px;
   --gx-header-h: 48px; --gx-details-w: 320px;
 }
@@ -11,15 +11,15 @@
   .gx-root:not([data-theme='light']) {
     --gx-bg: #14181f; --gx-surface: #1b2029; --gx-border: #2c333f; --gx-grid: #222833; --gx-text: #e6e9ef; --gx-muted: #9aa4b3;
     --gx-nonwork: #191d25; --gx-sel: #1e2d4a; --gx-sel-strong: #6c9cff; --gx-marked: #3a3220;
-    --gx-task: #4b7fe0; --gx-task-progress: #8db1ff; --gx-summary: #aab4c3; --gx-milestone: #f28b54;
-    --gx-link: #6e7a8c; --gx-link-sel: #6c9cff; --gx-today: #ff6b5f; --gx-marker: #a78bfa; --gx-warn: #ff8a80; --gx-warn-bg: #3d1f1d;
+    --gx-task: #3462c4; --gx-task-progress: #1c3d85; --gx-summary: #aab4c3; --gx-milestone: #f28b54;
+    --gx-link: #6e7a8c; --gx-link-sel: #6c9cff; --gx-today: #d3392e; --gx-marker: #7a5ad8; --gx-warn: #ff8a80; --gx-warn-bg: #3d1f1d;
   }
 }
 .gx-root[data-theme='dark'] {
   --gx-bg: #14181f; --gx-surface: #1b2029; --gx-border: #2c333f; --gx-grid: #222833; --gx-text: #e6e9ef; --gx-muted: #9aa4b3;
   --gx-nonwork: #191d25; --gx-sel: #1e2d4a; --gx-sel-strong: #6c9cff; --gx-marked: #3a3220;
-  --gx-task: #4b7fe0; --gx-task-progress: #8db1ff; --gx-summary: #aab4c3; --gx-milestone: #f28b54;
-  --gx-link: #6e7a8c; --gx-link-sel: #6c9cff; --gx-today: #ff6b5f; --gx-marker: #a78bfa; --gx-warn: #ff8a80; --gx-warn-bg: #3d1f1d;
+  --gx-task: #3462c4; --gx-task-progress: #1c3d85; --gx-summary: #aab4c3; --gx-milestone: #f28b54;
+  --gx-link: #6e7a8c; --gx-link-sel: #6c9cff; --gx-today: #d3392e; --gx-marker: #7a5ad8; --gx-warn: #ff8a80; --gx-warn-bg: #3d1f1d;
 }
 
 .gx-root, .gx-root * { box-sizing: border-box; }
@@ -40,6 +40,7 @@
 .gx-details-bottom .gx-main { flex-direction: column; }
 .gx-panes { flex: 1; display: flex; min-width: 0; min-height: 0; }
 
+.gx-grid-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .gx-grid { display: flex; flex-direction: column; position: relative; border-right: 1px solid var(--gx-border); flex-shrink: 0; }
 .gx-grid-head, .gx-row { display: grid; grid-template-columns: 56px 1fr 90px 44px; align-items: center; }
 .gx-grid-head { height: var(--gx-header-h); background: var(--gx-surface); border-bottom: 1px solid var(--gx-border); font-weight: 600; color: var(--gx-muted); font-size: 12px; }
@@ -71,6 +72,7 @@
 .gx-tick span { padding: 0 5px; line-height: 24px; position: sticky; left: 0; }
 .gx-major { top: 0; font-weight: 600; color: var(--gx-text); }
 .gx-minor { top: 50%; }
+.gx-chart:focus-visible { outline: 2px solid var(--gx-sel-strong); outline-offset: -2px; }
 .gx-chart { flex: 1; overflow: auto; position: relative; cursor: grab; overscroll-behavior: contain; }
 .gx-canvas { position: relative; }
 .gx-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--gx-grid); }
@@ -121,7 +123,7 @@
 .gx-chip.gx-warn { background: var(--gx-warn-bg); color: var(--gx-warn); }
 .gx-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 .gx-link-btn { background: none; border: 0; padding: 0; color: var(--gx-sel-strong); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.gx-small { font-size: 11px; }
+.gx-small { font-size: 11px; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
 .gx-note { background: var(--gx-marked); padding: 6px 8px; border-radius: 6px; }
 .gx-hint { font-size: 12px; margin-top: 16px !important; }
 .gx-empty { margin: auto; color: var(--gx-muted); padding: 40px; }
