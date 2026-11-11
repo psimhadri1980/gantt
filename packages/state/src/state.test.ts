@@ -31,3 +31,19 @@ describe('layout', () => {
     expect(rowAt(rows, totalHeight(rows) + 10)).toBe(rows.length);
   });
 });
+
+import { isoWeek, ticks } from './index.ts';
+import { toDay } from '@gantt/engine';
+describe('ISO week numbers', () => {
+  it.each([
+    ['2026-11-09', 46], ['2026-01-01', 1], ['2025-12-29', 1], ['2027-01-01', 53], ['2026-12-28', 53],
+    ['2027-01-04', 1], ['2021-01-03', 53], ['2024-12-30', 1], ['2020-12-31', 53],
+  ])('%s is week %i', (iso, w) => expect(isoWeek(toDay(iso))).toBe(w));
+  it('labels a week tick with its number and Monday start date', () => {
+    const d = toDay('2026-11-09');
+    const [t] = ticks({ origin: d, pxPerDay: 22 }, 'week', d, d + 6, 'en-GB');
+    expect(t!.label).toBe('W46 · 9 Nov');
+    const [n] = ticks({ origin: d, pxPerDay: 10 }, 'week', d, d + 6, 'en-GB');
+    expect(n!.label).toBe('W46 09/11');
+  });
+});

@@ -121,8 +121,8 @@ await test("operation API: the user's own actions go through interception", asyn
 });
 
 await test('the time scale labels follow every zoom level, including periods that start off-screen', async (page) => {
-  const expected = { Years: [/^\d{4}$/, /^[A-Z][a-z]{2}$/], Quarters: [/^\d{4}$/, /^[A-Z][a-z]{2} \d{4}$/], Months: [/^Q\d \d{4}$/, /^\d{1,2} [A-Z][a-z]{2}$/],
-    Weeks: [/^[A-Z][a-z]{2} \d{4}$/, /^\d{1,2} [A-Z][a-z]{2}$/], Days: [/^[A-Z][a-z]{2} \d{4}$/, /^[A-Z] \d{1,2}$/] };
+  const expected = { Years: [/^\d{4}$/, /^[A-Z][a-z]{2}$/], Quarters: [/^Q\d \d{4}$/, /^[A-Z][a-z]{2}$/], Months: [/^[A-Z][a-z]{2} \d{4}$/, /^W\d{1,2} \d{1,2}\/\d{1,2}$/],
+    Weeks: [/^[A-Z][a-z]{2} \d{4}$/, /^W\d{1,2} · \d{1,2} [A-Z][a-z]{2}$/], Days: [/^[A-Z][a-z]{2} \d{4}$/, /^[A-Z] \d{1,2}$/] };
   for (const z of ['Days', 'Weeks', 'Months', 'Quarters', 'Years', 'Months', 'Days']) {
     await page.getByRole('radio', { name: z }).click();
     await page.waitForTimeout(300);
@@ -135,6 +135,8 @@ await test('the time scale labels follow every zoom level, including periods tha
     if (!seen.minor.length) throw new Error(`${z}: no bottom-row label in view`);
     const [maj, min] = expected[z];
     if (!seen.major.every((t) => maj.test(t))) throw new Error(`${z}: top row shows ${JSON.stringify(seen.major)}`);
+    const clipped = await page.evaluate(() => [...document.querySelectorAll('.gx-tick span')].filter((s) => s.textContent && s.scrollWidth > s.clientWidth + 1).map((s) => s.textContent));
+    if (clipped.length) throw new Error(`${z}: labels cut off: ${clipped.slice(0, 3).join(', ')}`);
     if (!seen.minor.every((t) => min.test(t))) throw new Error(`${z}: bottom row shows ${JSON.stringify(seen.minor.slice(0, 4))}`);
   }
 });
