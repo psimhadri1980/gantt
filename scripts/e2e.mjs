@@ -120,6 +120,25 @@ await test("operation API: the user's own actions go through interception", asyn
   if (!(await page.getByTestId('oplog').textContent()).includes('✓ user: selection.set')) throw new Error('user selection not reported as an operation');
 });
 
+await test('the time scale labels follow every zoom level, including periods that start off-screen', async (page) => {
+  const expected = { Years: [/^\d{4}$/, /^[A-Z][a-z]{2}$/], Quarters: [/^\d{4}$/, /^[A-Z][a-z]{2} \d{4}$/], Months: [/^Q\d \d{4}$/, /^\d{1,2} [A-Z][a-z]{2}$/],
+    Weeks: [/^[A-Z][a-z]{2} \d{4}$/, /^\d{1,2} [A-Z][a-z]{2}$/], Days: [/^[A-Z][a-z]{2} \d{4}$/, /^[A-Z] \d{1,2}$/] };
+  for (const z of ['Days', 'Weeks', 'Months', 'Quarters', 'Years', 'Months', 'Days']) {
+    await page.getByRole('radio', { name: z }).click();
+    await page.waitForTimeout(300);
+    const seen = await page.evaluate(() => {
+      const hb = document.querySelector('.gx-scale').getBoundingClientRect();
+      const vis = (sel) => [...document.querySelectorAll(sel)].filter((s) => { const b = s.getBoundingClientRect(); return b.width > 0 && b.left >= hb.left - 1 && b.left < hb.right; }).map((s) => s.textContent);
+      return { major: vis('.gx-major span'), minor: vis('.gx-minor span').filter(Boolean) };
+    });
+    if (!seen.major.length) throw new Error(`${z}: no top-row label in view`);
+    if (!seen.minor.length) throw new Error(`${z}: no bottom-row label in view`);
+    const [maj, min] = expected[z];
+    if (!seen.major.every((t) => maj.test(t))) throw new Error(`${z}: top row shows ${JSON.stringify(seen.major)}`);
+    if (!seen.minor.every((t) => min.test(t))) throw new Error(`${z}: bottom row shows ${JSON.stringify(seen.minor.slice(0, 4))}`);
+  }
+});
+
 for (const theme of ['Light', 'Dark']) {
   await test(`accessibility scan (axe, WCAG 2.2 AA), ${theme.toLowerCase()} theme`, async (page) => {
     await page.selectOption('select >> nth=1', theme.toLowerCase());

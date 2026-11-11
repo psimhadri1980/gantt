@@ -68,8 +68,9 @@
 
 .gx-chart-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .gx-scale { height: var(--gx-header-h); overflow: hidden; background: var(--gx-surface); border-bottom: 1px solid var(--gx-border); flex-shrink: 0; }
-.gx-tick { position: absolute; height: 50%; border-left: 1px solid var(--gx-border); font-size: 11px; color: var(--gx-muted); white-space: nowrap; overflow: hidden; }
-.gx-tick span { padding: 0 5px; line-height: 24px; position: sticky; left: 0; }
+.gx-tick { position: absolute; height: 50%; border-left: 1px solid var(--gx-border); font-size: 11px; color: var(--gx-muted); white-space: nowrap; }
+.gx-tick span { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: top; box-sizing: border-box; padding: 0 5px; line-height: 24px; position: sticky; left: 0; }
+/* Ticks must not clip their overflow: a clipping box would become the sticky label's scroll container and the label would scroll away with the period start. */
 .gx-major { top: 0; font-weight: 600; color: var(--gx-text); }
 .gx-minor { top: 50%; }
 .gx-chart:focus-visible { outline: 2px solid var(--gx-sel-strong); outline-offset: -2px; }
