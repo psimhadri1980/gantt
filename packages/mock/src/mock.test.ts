@@ -20,3 +20,24 @@ describe('mock', () => {
     expect(doc.links.length).toBeGreaterThan(4500);
   });
 });
+
+import { splitForLazyLoading } from './index.ts';
+import { mergeChildren } from '../../state/src/index.ts';
+describe('splitForLazyLoading', () => {
+  it('holds back deeper levels and serves them one level at a time, ending with the full roadmap', async () => {
+    const full = generate({ tasks: 200, depth: 3, linkDensity: 0.4 });
+    const { initial, loadChildren } = splitForLazyLoading(full, 1, 0);
+    expect(loadMock(initial).ok).toBe(true);
+    expect(initial.tasks.every((t) => t.parent === null)).toBe(true);
+    let doc = initial;
+    for (let pending = doc.tasks.filter((t) => t.hasChildren); pending.length; pending = doc.tasks.filter((t) => t.hasChildren)) {
+      for (const t of pending) {
+        const r = mergeChildren(doc, t.id, await loadChildren(t.id));
+        if ('error' in r) throw new Error(r.error);
+        doc = r.doc;
+      }
+    }
+    expect(doc.tasks.length).toBe(full.tasks.length);
+    expect(doc.links.length).toBe(full.links.length);
+  });
+});

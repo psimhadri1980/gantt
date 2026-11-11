@@ -34,12 +34,3 @@ export function linkPath(l: Link, p: Placement, pos: Map<string, BarPos>, s: Sca
   pts.push([x2, y2]);
   return 'M' + pts.map(([x, y]) => `${Math.round(x) + 0.5},${Math.round(y) + 0.5}`).join('L');
 }
-
-export const LINK_WORDS: Record<Link['type'], string> = {
-  FS: 'must finish before', SS: 'must start before', FF: 'must finish before', SF: 'must start before',
-};
-/** "Requirements must finish before Sign-off starts" (section 3c). */
-export function describeLink(l: Link, src: string, tgt: string): string {
-  const end = l.type === 'FS' || l.type === 'SS' ? 'starts' : 'finishes';
-  return `${src} ${LINK_WORDS[l.type]} ${tgt} ${end}`;
-}

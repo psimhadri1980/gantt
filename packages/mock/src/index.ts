@@ -24,3 +24,30 @@ export function loadMock(input: string | unknown): LoadResult {
 export function exportMock(doc: RoadmapDocument): string {
   return JSON.stringify(doc, null, 2);
 }
+
+/**
+ * Splits a roadmap for loading on demand (H2): tasks below `depth` are held back, their parents are marked
+ * `hasChildren: true`, and `loadChildren` returns one level at a time after `delayMs`, like a server would.
+ */
+export function splitForLazyLoading(doc: RoadmapDocument, depth = 1, delayMs = 300) {
+  const parentOf = new Map(doc.tasks.map((t) => [t.id, t.parent]));
+  const level = (id: string) => { let d = 0; for (let p = parentOf.get(id); p; p = parentOf.get(p)) d++; return d; };
+  const kept = new Set(doc.tasks.filter((t) => level(t.id) < depth).map((t) => t.id));
+  const hasKids = new Set(doc.tasks.filter((t) => t.parent).map((t) => t.parent!));
+  const initial: RoadmapDocument = {
+    ...doc,
+    tasks: doc.tasks.filter((t) => kept.has(t.id)).map((t) => (hasKids.has(t.id) && level(t.id) === depth - 1 ? { ...t, hasChildren: true } : t)),
+    links: doc.links.filter((l) => kept.has(l.source) && kept.has(l.target)),
+  };
+  const sent = new Set(kept);
+  const loadChildren = (parentId: string) => new Promise<{ tasks: RoadmapDocument['tasks']; links: RoadmapDocument['links'] }>((resolve) => {
+    setTimeout(() => {
+      const tasks = doc.tasks.filter((t) => t.parent === parentId).map((t) => (hasKids.has(t.id) ? { ...t, hasChildren: true } : t));
+      tasks.forEach((t) => sent.add(t.id));
+      // Send the links whose both ends are now loaded.
+      const links = doc.links.filter((l) => sent.has(l.source) && sent.has(l.target) && (tasks.some((t) => t.id === l.source || t.id === l.target)));
+      resolve({ tasks, links });
+    }, delayMs);
+  });
+  return { initial, loadChildren };
+}

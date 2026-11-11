@@ -1,7 +1,7 @@
 /* All selectors are scoped under .gx-root; no global selectors, no dependence on host resets (ADR-001, cond. 3). */
 .gx-root {
   --gx-bg: #ffffff; --gx-surface: #f7f8fa; --gx-border: #e3e6eb; --gx-grid: #eef0f3; --gx-text: #1c2430; --gx-muted: #5e6a7a;
-  --gx-nonwork: #f3f4f7; --gx-sel: #e3edff; --gx-sel-strong: #1d55c0; --gx-marked: #fff4d6;
+  --gx-nonwork: #f3f4f7; --gx-holiday: #e2d6f5; --gx-sel: #e3edff; --gx-sel-strong: #1d55c0; --gx-marked: #fff4d6;
   --gx-task: #2f68d8; --gx-task-progress: #173f94; --gx-summary: #3b4656; --gx-milestone: #c2410c;
   --gx-link: #8994a5; --gx-link-sel: #2f6fe4; --gx-today: #c42a1f; --gx-marker: #6a48c9; --gx-warn: #b42318; --gx-warn-bg: #fde8e7;
   --gx-bar-text: #ffffff; --gx-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; --gx-font-size: 13px; --gx-radius: 4px;
@@ -10,14 +10,14 @@
 @media (prefers-color-scheme: dark) {
   .gx-root:not([data-theme='light']) {
     --gx-bg: #14181f; --gx-surface: #1b2029; --gx-border: #2c333f; --gx-grid: #222833; --gx-text: #e6e9ef; --gx-muted: #9aa4b3;
-    --gx-nonwork: #191d25; --gx-sel: #1e2d4a; --gx-sel-strong: #6c9cff; --gx-marked: #3a3220;
+    --gx-nonwork: #191d25; --gx-holiday: #3a2f55; --gx-sel: #1e2d4a; --gx-sel-strong: #6c9cff; --gx-marked: #3a3220;
     --gx-task: #3462c4; --gx-task-progress: #1c3d85; --gx-summary: #aab4c3; --gx-milestone: #f28b54;
     --gx-link: #6e7a8c; --gx-link-sel: #6c9cff; --gx-today: #d3392e; --gx-marker: #7a5ad8; --gx-warn: #ff8a80; --gx-warn-bg: #3d1f1d;
   }
 }
 .gx-root[data-theme='dark'] {
   --gx-bg: #14181f; --gx-surface: #1b2029; --gx-border: #2c333f; --gx-grid: #222833; --gx-text: #e6e9ef; --gx-muted: #9aa4b3;
-  --gx-nonwork: #191d25; --gx-sel: #1e2d4a; --gx-sel-strong: #6c9cff; --gx-marked: #3a3220;
+  --gx-nonwork: #191d25; --gx-holiday: #3a2f55; --gx-sel: #1e2d4a; --gx-sel-strong: #6c9cff; --gx-marked: #3a3220;
   --gx-task: #3462c4; --gx-task-progress: #1c3d85; --gx-summary: #aab4c3; --gx-milestone: #f28b54;
   --gx-link: #6e7a8c; --gx-link-sel: #6c9cff; --gx-today: #d3392e; --gx-marker: #7a5ad8; --gx-warn: #ff8a80; --gx-warn-bg: #3d1f1d;
 }
@@ -62,6 +62,7 @@
 .gx-twisty-sp { width: 18px; flex-shrink: 0; }
 .gx-badge { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--gx-grid); color: var(--gx-muted); flex-shrink: 0; }
 .gx-kind-icon { flex-shrink: 0; }
+.gx-badge-error { background: var(--gx-warn-bg); color: var(--gx-warn); }
 .gx-muted { color: var(--gx-muted); font-style: normal; }
 .gx-splitter { position: absolute; right: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; }
 .gx-splitter:hover, .gx-splitter:focus-visible { background: linear-gradient(90deg, transparent 3px, var(--gx-sel-strong) 3px, var(--gx-sel-strong) 5px, transparent 5px); }
@@ -78,6 +79,8 @@
 .gx-canvas { position: relative; }
 .gx-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--gx-grid); }
 .gx-nonwork { position: absolute; top: 0; bottom: 0; background: var(--gx-nonwork); }
+.gx-holiday { background: repeating-linear-gradient(135deg, var(--gx-nonwork) 0 6px, var(--gx-holiday) 6px 8px); }
+.gx-holiday-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--gx-holiday); }
 .gx-rowbg { position: absolute; left: 0; right: 0; border-bottom: 1px solid var(--gx-grid); }
 .gx-rowbg.gx-sel { background: color-mix(in srgb, var(--gx-sel) 70%, transparent); }
 .gx-rowbg.gx-lane { background: color-mix(in srgb, var(--gx-surface) 60%, transparent); }
@@ -128,6 +131,11 @@
 .gx-note { background: var(--gx-marked); padding: 6px 8px; border-radius: 6px; }
 .gx-hint { font-size: 12px; margin-top: 16px !important; }
 .gx-empty { margin: auto; color: var(--gx-muted); padding: 40px; }
+.gx-error { display: grid; gap: 8px; justify-items: start; max-width: 520px; color: var(--gx-text); }
+.gx-error p { margin: 0; color: var(--gx-warn); overflow-wrap: anywhere; }
+.gx-save { margin-left: auto; font-size: 12px; color: var(--gx-muted); padding: 2px 8px; border-radius: 10px; }
+.gx-save-saving::before { content: '●'; margin-right: 6px; color: var(--gx-sel-strong); }
+.gx-save-error { background: var(--gx-warn-bg); color: var(--gx-warn); }
 
 .gx-tooltip { position: fixed; z-index: 1000; pointer-events: none; background: var(--gx-text); color: var(--gx-bg); padding: 6px 9px; border-radius: 6px; font-size: 12px; max-width: 280px; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .gx-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

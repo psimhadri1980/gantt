@@ -93,3 +93,19 @@ describe('OperationPipeline timing', () => {
     expect(applied).toBe(true);
   });
 });
+
+import { mergeChildren } from './index.ts';
+describe('mergeChildren', () => {
+  const lazy: RoadmapDocument = { ...doc, tasks: [{ id: 's', name: 'S', type: 'summary', parent: null, hasChildren: true }, doc.tasks[2]!], links: [] };
+  it('adds the children, clears hasChildren and keeps links between loaded tasks', () => {
+    const r = mergeChildren(lazy, 's', { tasks: [doc.tasks[1]!], links: doc.links });
+    if ('error' in r) throw new Error(r.error);
+    expect(r.doc.tasks.find((t) => t.id === 's')!.hasChildren).toBeUndefined();
+    expect(r.doc.tasks.map((t) => t.id).sort()).toEqual(['a', 'b', 's']);
+    expect(r.doc.links).toHaveLength(1);
+  });
+  it('refuses children that belong elsewhere or break the contract', () => {
+    expect(mergeChildren(lazy, 's', { tasks: [{ ...doc.tasks[1]!, parent: 'b' }] })).toHaveProperty('error');
+    expect(mergeChildren(lazy, 's', { tasks: [{ ...doc.tasks[1]!, start: 'soon' }] })).toHaveProperty('error');
+  });
+});

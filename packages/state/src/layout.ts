@@ -5,6 +5,10 @@ export const ROW_HEIGHT = 36;
 export const LANE_TRACK = 28;
 export const LANE_PAD = 4;
 
+/** Row geometry (G1). Bars take the row height minus a margin; lane tracks stack bars within a lane row. */
+export interface RowSizes { row: number; laneTrack: number }
+export const DEFAULT_SIZES: RowSizes = { row: ROW_HEIGHT, laneTrack: LANE_TRACK };
+
 /** One bar on the chart. On an ordinary row it is the row's own task; on a lane row, one of its children. */
 export interface BarLayout {
   taskId: string;
@@ -18,6 +22,8 @@ export interface RowLayout {
   depth: number;
   wbs: string;
   hasChildren: boolean;
+  /** Has children that have not been loaded yet (H2). */
+  unloaded: boolean;
   expanded: boolean;
   lane: boolean;
   top: number;
@@ -62,14 +68,16 @@ export function buildModel(doc: RoadmapDocument, placement: Placement = place(do
  * stacked into tracks where they overlap, so rows differ in height. `laneOpen` lists lanes the user has
  * opened into ordinary rows.
  */
-export function layoutRows(m: Model, collapsed: ReadonlySet<string>, laneOpen: ReadonlySet<string> = new Set()): RowLayout[] {
+export function layoutRows(m: Model, collapsed: ReadonlySet<string>, laneOpen: ReadonlySet<string> = new Set(), sizes: RowSizes = DEFAULT_SIZES): RowLayout[] {
   const rows: RowLayout[] = [];
   let top = 0;
   const visit = (id: string, depth: number) => {
     const t = m.tasks.get(id)!;
     const kids = m.children.get(id) ?? [];
+    // A task may declare children that are not loaded yet (H2): it shows as collapsed and loads them on expand.
+    const unloaded = kids.length === 0 && t.hasChildren === true;
     const lane = !!t.lane && kids.length > 0 && !laneOpen.has(id);
-    const expanded = !collapsed.has(id);
+    const expanded = !unloaded && !collapsed.has(id);
     const rowIndex = rows.length;
     let bars: BarLayout[];
     let tracks = 1;
@@ -78,8 +86,8 @@ export function layoutRows(m: Model, collapsed: ReadonlySet<string>, laneOpen: R
       bars = r.bars.map((b) => ({ ...b, rowIndex }));
       tracks = Math.max(1, r.tracks);
     } else bars = [{ taskId: id, rowIndex, track: 0 }];
-    const height = lane ? Math.max(ROW_HEIGHT, tracks * LANE_TRACK + LANE_PAD * 2) : ROW_HEIGHT;
-    rows.push({ taskId: id, depth, wbs: m.wbs.get(id) ?? '', hasChildren: kids.length > 0, expanded, lane, top, height, bars, tracks });
+    const height = lane ? Math.max(sizes.row, tracks * sizes.laneTrack + LANE_PAD * 2) : sizes.row;
+    rows.push({ taskId: id, depth, wbs: m.wbs.get(id) ?? '', hasChildren: kids.length > 0 || unloaded, unloaded, expanded, lane, top, height, bars, tracks });
     top += height;
     if (!lane && expanded) for (const k of kids) visit(k, depth + 1);
   };
@@ -115,11 +123,11 @@ export function totalHeight(rows: RowLayout[]): number {
 }
 
 /** Where each visible bar sits vertically: the row's index and centre line. */
-export function barIndex(rows: RowLayout[]): Map<string, { row: RowLayout; y: number; h: number }> {
+export function barIndex(rows: RowLayout[], sizes: RowSizes = DEFAULT_SIZES): Map<string, { row: RowLayout; y: number; h: number }> {
   const m = new Map<string, { row: RowLayout; y: number; h: number }>();
   for (const r of rows) for (const b of r.bars) {
-    if (r.lane) m.set(b.taskId, { row: r, y: r.top + LANE_PAD + b.track * LANE_TRACK + 3, h: LANE_TRACK - 6 });
-    else m.set(b.taskId, { row: r, y: r.top + 8, h: ROW_HEIGHT - 16 });
+    if (r.lane) m.set(b.taskId, { row: r, y: r.top + LANE_PAD + b.track * sizes.laneTrack + 3, h: sizes.laneTrack - 6 });
+    else { const pad = Math.max(3, Math.round(sizes.row * 0.22)); m.set(b.taskId, { row: r, y: r.top + pad, h: sizes.row - pad * 2 }); }
   }
   return m;
 }

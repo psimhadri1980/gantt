@@ -141,6 +141,65 @@ await test('the time scale labels follow every zoom level, including periods tha
   }
 });
 
+await test('children load on demand when a row is expanded (H2)', async (page) => {
+  await page.selectOption('select >> nth=0', 'lazy');
+  const first = page.locator('[role="row"][aria-rowindex="2"]');
+  await first.waitFor();
+  expectEq(await first.getAttribute('aria-expanded'), 'false', 'an unloaded summary starts collapsed');
+  const before = await page.locator('.gx-grid-body [role="row"]').count();
+  await first.locator('.gx-twisty').click();
+  await first.getByText('Loading…').waitFor();
+  await page.waitForFunction((n) => document.querySelectorAll('.gx-grid-body [role="row"]').length > n, before);
+  expectEq(await first.getAttribute('aria-expanded'), 'true', 'the row is expanded once its children arrive');
+  const level2 = await page.locator('.gx-grid-body [role="row"][aria-level="2"]').count();
+  if (!level2) throw new Error('no child rows appeared');
+});
+
+await test('zooming keeps the selected item where it is on screen', async (page) => {
+  const bar = page.locator('.gx-bar', { hasText: 'Data model' }).first();
+  await bar.click();
+  const x0 = (await bar.boundingBox()).x;
+  for (const z of ['Days', 'Months', 'Weeks']) {
+    await page.getByRole('radio', { name: z }).click();
+    await page.waitForTimeout(300);
+    const x = (await page.locator('.gx-bar', { hasText: 'Data model' }).first().boundingBox()).x;
+    if (Math.abs(x - x0) > 2) throw new Error(`${z}: the selected bar moved from x=${x0} to x=${x}`);
+  }
+});
+
+await test('all visible text follows the messages and locale (German sample)', async (page) => {
+  await page.selectOption('select >> nth=3', 'de');
+  await page.getByRole('button', { name: 'Heute' }).waitFor();
+  await page.getByRole('radio', { name: 'Wochen' }).waitFor();
+  await page.locator('[role="row"]', { hasText: 'Requirements' }).click();
+  const details = await page.locator('.gx-details').textContent();
+  if (!details.includes('Zeitplan') || !details.includes('Arbeitstage')) throw new Error(`details not translated: ${details.slice(0, 120)}`);
+  if (!/\d+\.\s?Nov/.test(details) && !/Nov\./.test(details)) throw new Error(`dates not in German format: ${details.slice(0, 160)}`);
+});
+
+await test('save indicator shows Saving, then Saved or the reason it was not saved (F13)', async (page) => {
+  await page.evaluate(() => window.gantt.current.run({ type: 'task.update', id: 't3', fields: { progress: 0.5 } }));
+  await page.locator('.gx-save', { hasText: 'Saving…' }).waitFor();
+  await page.locator('.gx-save', { hasText: 'Saved' }).waitFor();
+  await page.getByLabel('Saves fail').check();
+  await page.evaluate(() => window.gantt.current.run({ type: 'task.update', id: 't3', fields: { progress: 0.6 } }));
+  await page.locator('.gx-save', { hasText: 'Not saved: the server is unreachable' }).waitFor();
+});
+
+await test('read-only mode refuses changes with a reason (G9)', async (page) => {
+  await page.getByLabel('Read-only').check();
+  const r = await page.evaluate(() => window.gantt.current.run({ type: 'task.delete', id: 't20' }));
+  expectEq(r.reason, 'The chart is read-only', 'refusal reason');
+  await page.locator('[role="row"]', { hasText: 'Decommission legacy' }).waitFor();
+});
+
+await test('holidays are shaded apart from weekends (G6)', async (page) => {
+  await page.getByRole('radio', { name: 'Days' }).click();
+  await page.evaluate(() => window.gantt.current.scrollToTask('t17'));
+  await page.locator('.gx-holiday').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => { throw new Error('no holiday shading around 24–25 Dec'); });
+  if (!(await page.locator('.gx-nonwork:not(.gx-holiday)').count())) throw new Error('no weekend shading');
+});
+
 for (const theme of ['Light', 'Dark']) {
   await test(`accessibility scan (axe, WCAG 2.2 AA), ${theme.toLowerCase()} theme`, async (page) => {
     await page.selectOption('select >> nth=1', theme.toLowerCase());

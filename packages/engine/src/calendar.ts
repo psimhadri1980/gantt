@@ -32,6 +32,8 @@ export class WorkCalendar {
     if (this.working.size === 0) throw new Error(`Calendar ${cal.id} has no working days`);
   }
 
+  isHoliday(d: DayNum): boolean { return this.holidays.has(d); }
+  holidaysBetween(from: DayNum, to: DayNum): DayNum[] { return [...this.holidays].filter((h) => h >= from && h <= to); }
   isWorking(d: DayNum): boolean {
     return this.working.has(weekday(d)) && !this.holidays.has(d);
   }

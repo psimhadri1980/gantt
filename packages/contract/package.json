@@ -1,1 +1,13 @@
-{"name":"@gantt/contract","version":"0.1.0","private":true,"type":"module","main":"src/index.ts","types":"src/index.ts","dependencies":{}}
+{
+  "name": "@gantt/contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {},
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./schema/gantt-roadmap-1.schema.json"
+  }
+}

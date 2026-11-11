@@ -19,7 +19,7 @@ const KNOWN: Record<string, string[]> = {
   roadmap: ['id', 'name', 'version', 'timeZone', 'start', 'defaultCalendar', 'statusDate'],
   calendar: ['id', 'name', 'workingDays', 'hoursPerDay', 'holidays'],
   task: ['id', 'name', 'type', 'parent', 'kind', 'lane', 'start', 'duration', 'durationUnit', 'end', 'progress',
-    'mode', 'owner', 'resources', 'constraint', 'deadline'],
+    'mode', 'owner', 'resources', 'constraint', 'deadline', 'hasChildren'],
   link: ['id', 'source', 'target', 'type', 'kind', 'lag', 'lagUnit'],
   resource: ['id', 'name', 'capacityFte', 'calendar'],
 };
@@ -141,6 +141,7 @@ export function validate(input: unknown): ValidationResult {
     }
     if (t.kind !== undefined && typeof t.kind !== 'string') err(`${p}.kind`, 'must be a string');
     if (t.lane !== undefined && typeof t.lane !== 'boolean') err(`${p}.lane`, 'must be true or false');
+    if (t.hasChildren !== undefined && typeof t.hasChildren !== 'boolean') err(`${p}.hasChildren`, 'must be true or false');
     if (t.type !== 'summary') {
       date(t, 'start', p); date(t, 'end', p);
       num(t, 'duration', p, 0);

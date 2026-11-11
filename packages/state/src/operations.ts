@@ -157,3 +157,26 @@ export class OperationPipeline {
 }
 
 const isThenable = <T,>(v: unknown): v is Promise<T> => !!v && typeof (v as { then?: unknown }).then === 'function';
+
+/**
+ * Merges children loaded on demand (H2) under `parentId`. This is data arriving, not an edit: it does not
+ * go through interception or authorisation and is not undoable. The result is validated like any load.
+ */
+export function mergeChildren(doc: RoadmapDocument, parentId: string, loaded: { tasks: Task[]; links?: Link[] }): { doc: RoadmapDocument } | { error: string } {
+  const parent = doc.tasks.find((t) => t.id === parentId);
+  if (!parent) return { error: `unknown task "${parentId}"` };
+  const ids = new Set(loaded.tasks.map((t) => t.id));
+  const outside = loaded.tasks.find((t) => t.parent !== parentId && !ids.has(t.parent ?? ''));
+  if (outside) return { error: `loaded task "${outside.id}" is not inside "${parentId}"` };
+  const tasks = [...doc.tasks.filter((t) => !ids.has(t.id)).map((t) => {
+    if (t.id !== parentId) return t;
+    const { hasChildren: _done, ...rest } = t;
+    return rest as Task;
+  }), ...loaded.tasks];
+  const linkIds = new Set((loaded.links ?? []).map((l) => l.id));
+  const links = [...doc.links.filter((l) => !linkIds.has(l.id)), ...(loaded.links ?? [])];
+  const next = { ...doc, tasks, links };
+  const v = validate(next);
+  if (!v.ok) return { error: v.errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join('; ') };
+  return { doc: next };
+}

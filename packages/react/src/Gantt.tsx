@@ -1,13 +1,14 @@
-import { forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
+import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  applyDataOperation, barIndex, buildModel, OperationPipeline, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS,
+  applyDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel,
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
 } from '@gantt/state';
 import { fromDay, type DayNum } from '@gantt/engine';
 import { placeOffThread } from './engineClient.ts';
 import { DetailsPanel, type GanttKinds } from './Details.tsx';
+import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
 import './gantt.css';
 
 export interface GanttProps {
@@ -43,6 +44,25 @@ export interface GanttProps {
   onDataChanged?: (data: RoadmapDocument, operation: DataOperation) => void;
   /** The current user's id, recorded on operations. */
   userId?: string;
+
+  // Configuration (G).
+  /** Zoom levels offered, from widest to narrowest; each sets the scale width (px per day) and its two rows (G1, G2). */
+  zoomLevels?: ZoomLevel[];
+  /** Row height and lane track height in px (G1). Scale height is the CSS variable --gx-header-h. */
+  rowHeight?: number;
+  laneTrackHeight?: number;
+  /** Shade weekends and holidays from the roadmap calendar (G6). Default true. */
+  highlightNonWorking?: boolean;
+  /** Read-only mode (G9): every data operation is refused with a reason; viewing, selecting and zooming still work. */
+  readOnly?: boolean;
+  /** Override any visible text (G12). Dates and numbers follow `locale`. */
+  messages?: Partial<GanttMessages>;
+  /** Save indicator (F13), driven by the host that persists changes. Omit to hide it. */
+  saveState?: { status: 'saving' | 'saved' | 'error'; reason?: string };
+  /** Replaces the default error state. */
+  errorState?: (e: { message: string; retry: () => void }) => ReactNode;
+  /** Loads the children of a task marked `hasChildren: true` when it is first expanded (H2). */
+  loadChildren?: (taskId: string) => Promise<{ tasks: Task[]; links?: Link[] }>;
 }
 
 /** Imperative handle (H3): `const ref = useRef<GanttHandle>(null); <Gantt ref={ref} … />`. */
@@ -63,7 +83,7 @@ interface ViewBridge {
   fit: () => void;
 }
 
-export interface ToolbarProps { zoom: string; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void }
+export interface ToolbarProps { zoom: string; levels: ZoomLevel[]; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void }
 
 /**
  * Rendering strategy (ADR-001, condition 2): rows are cut into memoised blocks of BLOCK rows, and the time
@@ -83,7 +103,7 @@ interface Api {
   toggleLane: (id: string) => void;
   tip: (x: number, y: number, content: ReactNode | null) => void;
 }
-interface Ctx { model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string> }
+interface Ctx { model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>; loadState: ReadonlyMap<string, string> }
 
 /**
  * Builds the model in its own task after the shell has painted, so no single main-thread task carries
@@ -101,7 +121,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(props, r
     () => {
       const p = propsRef.current;
       return {
-        beforeOperation: p.onBeforeOperation, authorize: p.authorize, operation: p.onOperation,
+        beforeOperation: (op, ctx) => {
+          if (p.readOnly && /^(task|link)\./.test(op.type)) return mergeMessages(p.messages).readOnly;
+          return p.onBeforeOperation?.(op, ctx);
+        },
+        authorize: p.authorize, operation: p.onOperation,
         refused: (r, ctx) => { p.onOperationRefused?.(r, ctx); if (r.stage === 'authorization') p.onAccessDenied?.({ operation: r.operation, reason: r.reason }); },
       };
     },
@@ -128,31 +152,96 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(props, r
     fit: () => viewRef.current?.fit(),
   }), [run]);
 
+  // Children loaded on demand (H2): per task, 'loading' or the reason the last load failed.
+  const [loadState, setLoadState] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const loadingRef = useRef(new Set<string>());
+  const requestChildren = useCallback((id: string) => {
+    const load = propsRef.current.loadChildren;
+    if (!load || loadingRef.current.has(id)) return;
+    loadingRef.current.add(id);
+    const mark = (v: string | null) => setLoadState((m) => { const n = new Map(m); v === null ? n.delete(id) : n.set(id, v); return n; });
+    mark('loading');
+    load(id).then((res) => {
+      const r = mergeChildren(docRef.current, id, res);
+      if ('error' in r) throw new Error(r.error);
+      docRef.current = r.doc;
+      setWorking({ from: propsRef.current.data, doc: r.doc });
+      mark(null);
+    }).catch((e: unknown) => mark(e instanceof Error ? e.message : String(e)))
+      .finally(() => loadingRef.current.delete(id));
+  }, []);
   const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(null);
+  const [failure, setFailure] = useState<{ doc: RoadmapDocument; message: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => { setFailure(null); setAttempt((a) => a + 1); }, []);
   useEffect(() => {
-    if (built?.data === doc) return;
+    if (built?.data === doc || failure?.doc === doc) return;
     // The engine places tasks in a worker; the main thread only builds the tree indexes and renders (as a transition).
     let cancelled = false;
+    const fail = (e: unknown) => { if (!cancelled) setFailure({ doc, message: e instanceof Error ? e.message : String(e) }); };
     placeOffThread(doc).then((placement) => {
       if (cancelled) return;
-      setTimeout(() => { if (!cancelled) { const model = buildModel(doc, placement); startTransition(() => setBuilt({ data: doc, model })); } }, 0);
-    });
+      setTimeout(() => {
+        if (cancelled) return;
+        try { const model = buildModel(doc, placement); startTransition(() => setBuilt({ data: doc, model })); } catch (e) { fail(e); }
+      }, 0);
+    }, fail);
     return () => { cancelled = true; };
-  }, [doc, built]);
+  }, [doc, built, failure, attempt]);
+  const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
+  if (failure?.doc === doc) return <ErrorState {...props} message={failure.message} retry={retry} themeAttr={themeAttr} />;
   // While a changed document is being placed, keep showing the previous one (no loading flash).
   if (!built) {
-    const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
-    return <div className="gx-root" {...themeAttr} style={{ height: props.height ?? 600 }} aria-busy="true"><div className="gx-empty">Loading roadmap…</div></div>;
+    return <div className="gx-root" {...themeAttr} style={{ height: props.height ?? 600 }} aria-busy="true"><div className="gx-empty">{mergeMessages(props.messages).loading}</div></div>;
   }
-  return <GanttView {...props} data={built.data} model={built.model} run={run} viewRef={viewRef} />;
+  return (
+    <ViewBoundary key={attempt} fallback={(message) => <ErrorState {...props} message={message} retry={retry} themeAttr={themeAttr} />}>
+      <GanttView {...props} data={built.data} model={built.model} run={run} viewRef={viewRef} loadState={loadState} requestChildren={requestChildren} />
+    </ViewBoundary>
+  );
 });
 
-function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null> }) {
+function ErrorState(props: GanttProps & { message: string; retry: () => void; themeAttr: object }) {
+  const m = mergeMessages(props.messages);
+  return (
+    <div className="gx-root" {...props.themeAttr} style={{ height: props.height ?? 600 }}>
+      {props.errorState ? props.errorState({ message: props.message, retry: props.retry }) : (
+        <div className="gx-empty gx-error" role="alert">
+          <strong>{m.errorTitle}</strong>
+          <p>{props.message}</p>
+          <button className="gx-btn" onClick={props.retry}>{m.errorRetry}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Catches a rendering failure so the host page survives and the user sees the error state with a retry. */
+class ViewBoundary extends Component<{ fallback: (message: string) => ReactNode; children: ReactNode }, { message: string | null }> {
+  state = { message: null as string | null };
+  static getDerivedStateFromError(e: unknown) { return { message: e instanceof Error ? e.message : String(e) }; }
+  render() { return this.state.message !== null ? this.props.fallback(this.state.message) : this.props.children; }
+}
+
+function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> }) {
+  const { t: m } = useI18n();
+  const text = state.status === 'saving' ? m.saving : state.status === 'saved' ? m.saved : m.notSaved(state.reason ?? '');
+  return <span className={`gx-save gx-save-${state.status}`} role="status">{text}</span>;
+}
+
+function GanttView(props: GanttProps & {
+  model: Model; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
+  loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
+}) {
   const { data, kinds, locale, detailsPanel = 'right', height = 600, model, run } = props;
+  const i18n = useMemo(() => makeI18n(mergeMessages(props.messages), locale), [props.messages, locale]);
+  const m = i18n.t;
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [laneOpen, setLaneOpen] = useState<Set<string>>(() => new Set());
-  const rows = useMemo(() => layoutRows(model, collapsed, laneOpen), [model, collapsed, laneOpen]);
-  const bars = useMemo(() => barIndex(rows), [rows]);
+  const sizes = useMemo<RowSizes>(() => ({ row: props.rowHeight ?? DEFAULT_SIZES.row, laneTrack: props.laneTrackHeight ?? DEFAULT_SIZES.laneTrack }), [props.rowHeight, props.laneTrackHeight]);
+  const levels = props.zoomLevels?.length ? props.zoomLevels : ZOOM_LEVELS;
+  const rows = useMemo(() => layoutRows(model, collapsed, laneOpen, sizes), [model, collapsed, laneOpen, sizes]);
+  const bars = useMemo(() => barIndex(rows, sizes), [rows, sizes]);
   const rowIndexOf = useMemo(() => new Map(rows.map((r, i) => [r.taskId, i])), [rows]);
   const blocks = useMemo(() => {
     const out: Block[] = [];
@@ -160,9 +249,9 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
     return out;
   }, [rows]);
 
-  const [zoomState, setZoomState] = useState(props.zoom ?? 'week');
+  const [zoomState, setZoomState] = useState(props.zoom ?? (levels.find((z) => z.id === 'week') ?? levels[Math.floor(levels.length / 2)]!).id);
   const zoom = props.zoom ?? zoomState;
-  const level = ZOOM_LEVELS.find((z) => z.id === zoom) ?? ZOOM_LEVELS[3]!;
+  const level = levels.find((z) => z.id === zoom) ?? levels[Math.floor(levels.length / 2)]!;
   const span = model.placement.span;
   const origin = (span?.start ?? 0) - 21;
   const endDay = (span?.end ?? origin + 90) + 45;
@@ -192,7 +281,7 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ b0: 0, b1: 1, c0: 0, c1: 1, h: 600 });
-  const geom = useRef({ rows, scale, blocksLen: blocks.length, zoom }); geom.current = { rows, scale, blocksLen: blocks.length, zoom };
+  const geom = useRef({ rows, scale, blocksLen: blocks.length, zoom, levels }); geom.current = { rows, scale, blocksLen: blocks.length, zoom, levels };
   // Viewport size comes from the ResizeObserver, so the scroll handler only reads scroll offsets and never forces layout.
   const size = useRef({ w: 1000, h: 600 });
   const measure = useCallback((top?: number, left?: number) => {
@@ -220,7 +309,8 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
     ro.observe(el); return () => ro.disconnect();
   }, [measure]);
 
-  const todayDay = useMemo(() => dayOfIso(props.today ?? data.roadmap.statusDate ?? new Date().toISOString().slice(0, 10)), [props.today, data.roadmap.statusDate]);
+  // "Today" is the date in the roadmap's time zone (G13), so every user sees the same today line.
+  const todayDay = useMemo(() => dayOfIso(props.today ?? data.roadmap.statusDate ?? todayIn(data.roadmap.timeZone)), [props.today, data.roadmap.statusDate, data.roadmap.timeZone]);
 
   const scrollToDay = useCallback((d: DayNum, smooth = true) => {
     const el = chartRef.current; if (!el) return;
@@ -228,6 +318,9 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   }, [scale]);
   const scrollToToday = useCallback(() => scrollToDay(todayDay), [scrollToDay, todayDay]);
 
+  // Zooming from the toolbar or keyboard keeps the selected item where it is on screen, else today, else the centre (F11).
+  const anchorRef = useRef({ selection: [] as SelectionTarget[], model, today: 0 });
+  anchorRef.current = { selection, model, today: todayDay };
   const onZoomRef = useRef(props.onZoomChanged); onZoomRef.current = props.onZoomChanged;
   const pendingAnchor = useRef<{ day: number; px: number } | null>(null);
   const gesture = useRef<{ from: number; px: number; timer: number } | null>(null);
@@ -235,7 +328,10 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   const applyZoom = useCallback((z: string) => { startTransition(() => setZoomState(z)); onZoomRef.current?.(z); }, []);
   const setZoom = useCallback((z: string, anchorPx?: number) => {
     const el = chartRef.current, sc = geom.current.scale;
-    if (el && !pendingAnchor.current) { const px = anchorPx ?? el.clientWidth / 2; pendingAnchor.current = { day: (el.scrollLeft + px) / sc.pxPerDay + sc.origin, px }; }
+    if (el && !pendingAnchor.current) {
+      if (anchorPx !== undefined) pendingAnchor.current = { day: (el.scrollLeft + anchorPx) / sc.pxPerDay + sc.origin, px: anchorPx };
+      else pendingAnchor.current = zoomAnchor(el, sc, anchorRef.current.selection, anchorRef.current.model, anchorRef.current.today);
+    }
     void run({ type: 'zoom.set', zoom: z }, 'user').then((r) => { if (!r.ok) { pendingAnchor.current = null; zoomRef.current = geom.current.zoom; } });
   }, [run]);
   useLayoutEffect(() => {
@@ -245,7 +341,8 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   const fit = useCallback(() => {
     const el = chartRef.current; if (!el || !span) return;
     const days = span.end - span.start + 1;
-    const best = [...ZOOM_LEVELS].reverse().find((z) => days * z.pxPerDay <= el.clientWidth - 40) ?? ZOOM_LEVELS[0]!;
+    const ls = geom.current.levels;
+    const best = [...ls].sort((a, b) => b.pxPerDay - a.pxPerDay).find((z) => days * z.pxPerDay <= el.clientWidth - 40) ?? ls[0]!;
     void run({ type: 'zoom.set', zoom: best.id }, 'user').then((r) => {
       if (r.ok) requestAnimationFrame(() => { el.scrollLeft = (span.start - origin) * best.pxPerDay - 20; });
     });
@@ -263,14 +360,15 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
     const h = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      const i = ZOOM_LEVELS.findIndex((z) => z.id === zoomRef.current);
-      const ni = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, i + (e.deltaY < 0 ? 1 : -1)));
+      const ls = geom.current.levels;
+      const i = ls.findIndex((z) => z.id === zoomRef.current);
+      const ni = Math.max(0, Math.min(ls.length - 1, i + (e.deltaY < 0 ? 1 : -1)));
       if (ni === i) return;
       const px = e.clientX - el.getBoundingClientRect().left;
-      zoomRef.current = ZOOM_LEVELS[ni]!.id;
+      zoomRef.current = ls[ni]!.id;
       // Preview: scale the drawn canvas and the axis on the compositor; React redraws once the gesture settles.
       const g = gesture.current ?? (gesture.current = { from: geom.current.scale.pxPerDay, px, timer: 0 });
-      const k = ZOOM_LEVELS[ni]!.pxPerDay / g.from;
+      const k = ls[ni]!.pxPerDay / g.from;
       const ox = el.scrollLeft + g.px;
       for (const n of [canvasRef.current, headerInnerRef.current]) if (n) { n.style.transformOrigin = `${ox}px 0`; n.style.transform = `scaleX(${k})`; }
       clearTimeout(g.timer);
@@ -296,16 +394,23 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   }, []);
   const [announce, setAnnounce] = useState('');
   const treeRef = useRef({ collapsed, laneOpen }); treeRef.current = { collapsed, laneOpen };
-  const toggle = useCallback((id: string) => { void run({ type: treeRef.current.collapsed.has(id) ? 'row.expand' : 'row.collapse', id }, 'user'); }, [run]);
+  const toggle = useCallback((id: string) => {
+    const r = geom.current.rows.find((x) => x.taskId === id);
+    const expand = r ? !r.expanded : treeRef.current.collapsed.has(id);
+    void run({ type: expand ? 'row.expand' : 'row.collapse', id }, 'user');
+  }, [run]);
   const toggleLane = useCallback((id: string) => { void run({ type: treeRef.current.laneOpen.has(id) ? 'lane.close' : 'lane.open', id }, 'user'); }, [run]);
   const setIn = (set: React.Dispatch<React.SetStateAction<Set<string>>>, id: string, on: boolean) =>
     set((c) => { if (c.has(id) === on) return c; const n = new Set(c); on ? n.add(id) : n.delete(id); return n; });
   const selRef = useRef({ selection, selKeys, model }); selRef.current = { selection, selKeys, model };
+  const i18nRef = useRef(i18n); i18nRef.current = i18n;
   const doSelect = useCallback((t: SelectionTarget, additive: boolean) => {
-    const { selection: cur, selKeys: keys, model: m } = selRef.current;
+    const { selection: cur, selKeys: keys, model: mdl } = selRef.current;
     const next = additive ? (keys.has(targetKey(t)) ? cur.filter((s) => targetKey(s) !== targetKey(t)) : [...cur, t]) : [t];
     select(next);
-    setAnnounce(next.length ? `${labelOf(t, m)} selected${next.length > 1 ? `, ${next.length} items` : ''}` : 'Selection cleared');
+    const tx = i18nRef.current;
+    const name = labelOf(t, mdl, tx.t);
+    setAnnounce(next.length > 1 ? tx.t.selectedMany(name, tx.num(next.length)) : next.length ? tx.t.selected(name) : tx.t.selectionCleared);
   }, [select]);
 
   const tipRef = useRef<(s: TipState | null) => void>(() => {});
@@ -329,12 +434,17 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   bridge.current = {
     apply: (op) => {
       switch (op.type) {
-        case 'row.expand': setIn(setCollapsed, op.id, false); break;
+        case 'row.expand': {
+          setIn(setCollapsed, op.id, false);
+          const r = geom.current.rows.find((x) => x.taskId === op.id);
+          if (r?.unloaded) props.requestChildren(op.id);
+          break;
+        }
         case 'row.collapse': setIn(setCollapsed, op.id, true); break;
         case 'lane.open': setIn(setLaneOpen, op.id, true); break;
         case 'lane.close': setIn(setLaneOpen, op.id, false); break;
         case 'selection.set': applySelection(op.selection); break;
-        case 'zoom.set': if (!ZOOM_LEVELS.some((z) => z.id === op.zoom)) throw new Error(`unknown zoom level "${op.zoom}"`); applyZoom(op.zoom); break;
+        case 'zoom.set': if (!geom.current.levels.some((z) => z.id === op.zoom)) throw new Error(`unknown zoom level "${op.zoom}"`); applyZoom(op.zoom); break;
       }
     },
     getSelection: () => selRef.current.selection,
@@ -345,7 +455,8 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
       scrollToTask: (id) => bridge.current!.scrollToTask(id), scrollToToday: () => bridge.current!.scrollToToday(), fit: () => bridge.current!.fit() };
     return () => { props.viewRef.current = null; };
   }, [props.viewRef]);
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked }), [model, kinds, locale, laneOpen, selKeys, linkMarked]);
+  const loadState = props.loadState;
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState }), [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState]);
 
   const targetFor = (r: RowLayout, bar: number): SelectionTarget =>
     r.lane && bar >= 0 ? { type: 'bar', taskId: r.bars[bar]!.taskId, bar: 'main' } : { type: 'row', taskId: r.taskId };
@@ -371,9 +482,9 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
         break;
       case ' ': doSelect(targetFor(r, focus.bar), e.ctrlKey || e.metaKey || e.shiftKey); break;
       case 'Enter': if (r.lane) toggleLane(r.taskId); else doSelect(targetFor(r, focus.bar), false); break;
-      case 'Escape': select([]); setAnnounce('Selection cleared'); break;
-      case '+': case '=': setZoom(ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, ZOOM_LEVELS.indexOf(level) + 1)]!.id); break;
-      case '-': setZoom(ZOOM_LEVELS[Math.max(0, ZOOM_LEVELS.indexOf(level) - 1)]!.id); break;
+      case 'Escape': select([]); setAnnounce(m.selectionCleared); break;
+      case '+': case '=': setZoom(levels[Math.min(levels.length - 1, levels.indexOf(level) + 1)]!.id); break;
+      case '-': setZoom(levels[Math.max(0, levels.indexOf(level) - 1)]!.id); break;
       case 't': scrollToToday(); break;
       case 'F6': { // move focus to the details panel (and back with F6 there)
         const panel = rootRef.current?.querySelector<HTMLElement>('.gx-details');
@@ -412,7 +523,7 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
   const visibleBlocks = blocks.slice(view.b0, view.b1);
   const dayFrom = origin + view.c0 * DAY_CHUNK, dayTo = origin + view.c1 * DAY_CHUNK;
-  const markers = useMemo(() => [{ day: todayDay, label: 'Today', today: true }, ...(props.markers ?? []).map((m) => ({ day: dayOfIso(m.date), label: m.label, today: false }))], [todayDay, props.markers]);
+  const markers = useMemo(() => [{ day: todayDay, label: m.todayMarker, today: true }, ...(props.markers ?? []).map((m) => ({ day: dayOfIso(m.date), label: m.label, today: false }))], [todayDay, props.markers, m]);
   const H = totalHeight(rows);
   // Links are bucketed by the block of their upper end; links spanning more than two blocks are drawn separately.
   const linkBuckets = useMemo(() => {
@@ -429,10 +540,11 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
   const longVisible = useMemo(() => linkBuckets.long.filter((x) => x.b1 >= view.b0 && x.b0 < view.b1).map((x) => x.l), [linkBuckets, view.b0, view.b1]);
 
   if (data.tasks.length === 0) {
-    return <div className="gx-root" {...themeAttr} style={{ height }}>{props.emptyState ?? <div className="gx-empty">This roadmap has no tasks yet.</div>}</div>;
+    return <div className="gx-root" {...themeAttr} style={{ height }}>{props.emptyState ?? <div className="gx-empty">{m.empty}</div>}</div>;
   }
 
   return (
+    <I18nContext.Provider value={i18n}>
     <div ref={rootRef} className={`gx-root gx-details-${detailsPanel || 'none'}`} {...themeAttr} style={{ height }}
       onKeyDown={(e) => {
         if (e.key !== 'F6' || !(e.target as HTMLElement).closest('.gx-details')) return;
@@ -441,8 +553,9 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
       }}>
       {Toolbar && (
         <div className="gx-toolbar-row">
-          <Toolbar zoom={zoom} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit} />
-          <button className="gx-btn" onClick={() => setGridHidden((h) => !h)} aria-pressed={!gridHidden}>{gridHidden ? 'Show grid' : 'Hide grid'}</button>
+          <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit} />
+          <button className="gx-btn" onClick={() => setGridHidden((h) => !h)} aria-pressed={!gridHidden}>{gridHidden ? m.showGrid : m.hideGrid}</button>
+          {props.saveState && <SaveIndicator state={props.saveState} />}
         </div>
       )}
       <div className="gx-main">
@@ -451,10 +564,10 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
             <div className="gx-grid" style={{ width: gridW }}>
               <div className="gx-grid-inner" role="treegrid" aria-label={data.roadmap.name} aria-rowcount={rows.length + 1} aria-multiselectable="true">
               <div className="gx-grid-head" role="row" aria-rowindex={1}>
-                <span className="gx-col-wbs" role="columnheader">WBS</span>
-                <span className="gx-col-name" role="columnheader">Name</span>
-                <span className="gx-col-date" role="columnheader">Start</span>
-                <span className="gx-col-dur" role="columnheader">Days</span>
+                <span className="gx-col-wbs" role="columnheader">{m.colWbs}</span>
+                <span className="gx-col-name" role="columnheader">{m.colName}</span>
+                <span className="gx-col-date" role="columnheader">{m.colStart}</span>
+                <span className="gx-col-dur" role="columnheader">{m.colDays}</span>
               </div>
               <div className="gx-grid-body" ref={gridBodyRef} role="rowgroup" onKeyDown={onKeyDown}
                 onWheel={(e) => { if (chartRef.current) chartRef.current.scrollTop += e.deltaY; }}>
@@ -464,7 +577,7 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
                 </div>
               </div>
               </div>
-              <div className="gx-splitter" role="separator" aria-orientation="vertical" aria-label="Resize grid" tabIndex={0}
+              <div className="gx-splitter" role="separator" aria-orientation="vertical" aria-label={m.resizeGrid} tabIndex={0}
                 aria-valuenow={gridW} aria-valuemin={GRID_MIN} aria-valuemax={900}
                 onPointerDown={startSplit}
                 onKeyDown={(e) => { if (e.key === 'ArrowLeft') setGridW((w) => Math.max(GRID_MIN, w - 20)); if (e.key === 'ArrowRight') setGridW((w) => Math.min(900, w + 20)); }} />
@@ -477,13 +590,13 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
                 <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} />
               </div>
             </div>
-            <div className="gx-chart" ref={chartRef} onScroll={onScroll} tabIndex={0} role="region" aria-label="Timeline: scroll with the arrow keys"
+            <div className="gx-chart" ref={chartRef} onScroll={onScroll} tabIndex={0} role="region" aria-label={m.timeline}
               onPointerDown={(e) => { if ((e.target as HTMLElement).closest('.gx-bar,.gx-link-hit')) return; const el = chartRef.current!; pan.current = { x: e.clientX, y: e.clientY, l: el.scrollLeft, t: el.scrollTop, moved: false }; }}
               onPointerMove={(e) => { const p = pan.current; if (!p) return; const dx = e.clientX - p.x, dy = e.clientY - p.y; if (Math.abs(dx) + Math.abs(dy) > 4) p.moved = true; if (p.moved) { chartRef.current!.scrollLeft = p.l - dx; chartRef.current!.scrollTop = p.t - dy; } }}
               onPointerUp={() => { const p = pan.current; pan.current = null; if (p && !p.moved) select([]); }}
               onPointerLeave={() => { pan.current = null; }}>
               <div className="gx-canvas" ref={canvasRef} style={{ width: chartWidth, height: H }}>
-                <BackgroundLayer scale={scale} minor={level.minor} from={dayFrom} to={dayTo} model={model} />
+                <BackgroundLayer scale={scale} minor={level.minor} from={dayFrom} to={dayTo} model={model} shade={props.highlightNonWorking !== false} />
                 {visibleBlocks.map((b) => <RowBgBlock key={'bg' + b.index} block={b} selKeys={selKeys} />)}
                 <svg className="gx-links" width={chartWidth} height={H} aria-hidden>
                   <defs>
@@ -501,18 +614,20 @@ function GanttView(props: GanttProps & { model: Model; run: (op: GanttOperation,
             </div>
           </div>
         </div>
-        {detailsPanel && <DetailsPanel model={model} selection={selection} kinds={kinds} locale={locale} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} />}
+        {detailsPanel && <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n} />}
       </div>
       <Tooltip setterRef={tipRef} />
       <div className="gx-sr" aria-live="polite">{announce}</div>
     </div>
+    </I18nContext.Provider>
   );
 }
 
 // ---------- memoised layers ----------
 
 const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block: Block; ctx: Ctx; api: Api; focusRow: number }) {
-  const { model, kinds, locale, laneOpen, selKeys, linkMarked } = ctx;
+  const { model, kinds, locale, laneOpen, selKeys, linkMarked, loadState } = ctx;
+  const { t: m, num } = useI18n();
   return <>{block.rows.map((r, k) => {
     const i = block.start + k;
     const t = model.tasks.get(r.taskId)!;
@@ -530,18 +645,20 @@ const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block
         <span className="gx-col-wbs" role="gridcell">{r.wbs}</span>
         <span className="gx-col-name" role="gridcell" style={{ paddingLeft: 6 + r.depth * 16 }}>
           {r.hasChildren ? (
-            <button className="gx-twisty" tabIndex={-1} aria-label={r.lane ? 'Open lane into rows' : r.expanded ? 'Collapse' : 'Expand'}
+            <button className="gx-twisty" tabIndex={-1} aria-label={r.lane ? m.openLane : r.expanded ? m.collapse : m.expand}
               onClick={(e) => { e.stopPropagation(); r.lane ? api.toggleLane(r.taskId) : api.toggle(r.taskId); }}>
               {r.lane ? '≡' : r.expanded ? '▾' : '▸'}
             </button>
           ) : <span className="gx-twisty-sp" />}
           {kind?.icon ? <span className="gx-kind-icon" aria-hidden>{kind.icon}</span> : null}
           <span className="gx-name-text" title={t.name}>{t.name}</span>
-          {r.lane && <span className="gx-badge" title="Lane row: its children are drawn as bars on this row">{r.bars.length} bars</span>}
-          {laneOpen.has(r.taskId) && <button className="gx-twisty gx-relane" tabIndex={-1} aria-label="Close into lane" onClick={(e) => { e.stopPropagation(); api.toggleLane(r.taskId); }}>⇤</button>}
+          {loadState.get(r.taskId) === 'loading' && <span className="gx-badge" role="status">{m.loadingChildren}</span>}
+          {loadState.has(r.taskId) && loadState.get(r.taskId) !== 'loading' && <span className="gx-badge gx-badge-error" title={m.loadFailed(loadState.get(r.taskId)!)} role="status">⚠<span className="gx-sr">{m.loadFailed(loadState.get(r.taskId)!)}</span></span>}
+          {r.lane && <span className="gx-badge" title={m.laneBarsHint}>{m.laneBars(num(r.bars.length))}</span>}
+          {laneOpen.has(r.taskId) && <button className="gx-twisty gx-relane" tabIndex={-1} aria-label={m.closeLane} onClick={(e) => { e.stopPropagation(); api.toggleLane(r.taskId); }}>⇤</button>}
         </span>
-        <span className="gx-col-date" role="gridcell">{p.scheduled ? fmtDate(p.start!, locale) : <em className="gx-muted">Unscheduled</em>}</span>
-        <span className="gx-col-dur" role="gridcell">{p.scheduled ? p.duration : ''}</span>
+        <span className="gx-col-date" role="gridcell">{p.scheduled ? fmtDate(p.start!, locale) : <em className="gx-muted">{m.unscheduled}</em>}</span>
+        <span className="gx-col-dur" role="gridcell">{p.scheduled ? num(p.duration ?? 0) : ''}</span>
       </div>
     );
   })}</>;
@@ -556,7 +673,8 @@ const RowBgBlock = memo(function RowBgBlock({ block, selKeys }: { block: Block; 
 
 const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   { block: Block; ctx: Ctx; api: Api; scale: Scale; bars: ReturnType<typeof barIndex>; focus: { row: number; bar: number } | null }) {
-  const { model, selKeys, linkMarked, locale } = ctx;
+  const { model, selKeys, linkMarked } = ctx;
+  const i18n = useI18n();
   return <>{block.rows.flatMap((r, k) => r.bars.map((b, bi) => {
     const p = model.placement.byId.get(b.taskId)!;
     if (!p.scheduled) return null;
@@ -570,7 +688,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     const focused = !!focus && focus.row === row && (r.lane ? bi === focus.bar : focus.bar < 0);
     const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}`;
     const onClick = (e: React.MouseEvent) => { e.stopPropagation(); api.focus(row, r.lane ? bi : -1); api.select(r.lane ? { type: 'bar', taskId: t.id, bar: 'main' } : { type: 'row', taskId: t.id }, e.ctrlKey || e.metaKey); };
-    const tipOn = (e: React.PointerEvent) => api.tip(e.clientX, e.clientY, taskTip(t, model, locale));
+    const tipOn = (e: React.PointerEvent) => api.tip(e.clientX, e.clientY, taskTip(t, model, i18n));
     const tipOff = () => api.tip(0, 0, null);
     if (t.type === 'milestone') {
       const s = pos.h;
@@ -587,6 +705,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
 
 const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, api }:
   { links: Link[] | undefined; model: Model; bars: ReturnType<typeof barIndex>; scale: Scale; selKeys: ReadonlySet<string>; api: Api }) {
+  const i18n = useI18n();
   return <>{(links ?? []).map((l) => {
     const d = linkPath(l, model.placement, bars, scale);
     if (!d) return null;
@@ -594,7 +713,7 @@ const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, 
       <g key={l.id} className={`gx-link${selKeys.has(`link:${l.id}`) ? ' gx-sel' : ''}${l.kind ? ` gx-kind-${cssId(l.kind)}` : ''}`}>
         <path d={d} className="gx-link-line" markerEnd="url(#gx-arrow)" />
         <path d={d} className="gx-link-hit" onClick={(e) => { e.stopPropagation(); api.select({ type: 'link', linkId: l.id }, e.ctrlKey || e.metaKey); }}
-          onPointerMove={(e) => api.tip(e.clientX, e.clientY, linkTip(l, model))} onPointerLeave={() => api.tip(0, 0, null)} />
+          onPointerMove={(e) => api.tip(e.clientX, e.clientY, linkTip(l, model, i18n))} onPointerLeave={() => api.tip(0, 0, null)} />
       </g>
     );
   })}</>;
@@ -607,17 +726,21 @@ const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, loc
   </>;
 });
 
-const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, model }: { scale: Scale; minor: 'month' | 'week' | 'day'; from: number; to: number; model: Model }) {
+const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, model, shade }: { scale: Scale; minor: 'month' | 'week' | 'day'; from: number; to: number; model: Model; shade: boolean }) {
   const out: ReactNode[] = [];
-  if (scale.pxPerDay >= 8) {
-    // Merge consecutive non-working days into one element.
-    const cal = model.placement.calendar;
+  const cal = model.placement.calendar;
+  if (shade && scale.pxPerDay >= 8) {
+    // Merge consecutive weekend days into one element; holidays get their own, so they can be told apart (G6).
     for (let d = from; d <= to; d++) {
       if (cal.isWorking(d)) continue;
-      let e = d; while (e + 1 <= to && !cal.isWorking(e + 1)) e++;
-      out.push(<div key={'w' + d} className="gx-nonwork" style={{ left: xOf(scale, d), width: (e - d + 1) * scale.pxPerDay }} />);
+      const holiday = cal.isHoliday(d);
+      let e = d; while (e + 1 <= to && !cal.isWorking(e + 1) && cal.isHoliday(e + 1) === holiday) e++;
+      out.push(<div key={'w' + d} className={holiday ? 'gx-nonwork gx-holiday' : 'gx-nonwork'} style={{ left: xOf(scale, d), width: (e - d + 1) * scale.pxPerDay }} />);
       d = e;
     }
+  } else if (shade) {
+    // Too narrow to shade days: mark holidays as thin lines.
+    for (const h of cal.holidaysBetween(from, to)) out.push(<div key={'h' + h} className="gx-holiday-line" style={{ left: xOf(scale, h) }} />);
   }
   for (const t of ticks(scale, minor, from, to)) out.push(<div key={'g' + t.day} className="gx-gridline" style={{ left: t.x }} />);
   return <>{out}</>;
@@ -630,32 +753,52 @@ function Tooltip({ setterRef }: { setterRef: React.RefObject<(s: TipState | null
   return tip ? <div className="gx-tooltip" role="tooltip" style={{ left: tip.x + 12, top: tip.y + 14 }}>{tip.content}</div> : null;
 }
 
-function DefaultToolbar({ zoom, setZoom, scrollToToday, fit }: ToolbarProps) {
+function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit }: ToolbarProps) {
+  const { t: m } = useI18n();
   return (
-    <div className="gx-toolbar" role="toolbar" aria-label="Chart navigation">
-      <div className="gx-seg" role="radiogroup" aria-label="Zoom">
-        {ZOOM_LEVELS.map((z) => <button key={z.id} role="radio" aria-checked={z.id === zoom} className={`gx-btn${z.id === zoom ? ' gx-on' : ''}`} onClick={() => setZoom(z.id)}>{z.label}</button>)}
+    <div className="gx-toolbar" role="toolbar" aria-label={m.toolbarLabel}>
+      <div className="gx-seg" role="radiogroup" aria-label={m.zoomLabel}>
+        {levels.map((z) => <button key={z.id} role="radio" aria-checked={z.id === zoom} className={`gx-btn${z.id === zoom ? ' gx-on' : ''}`} onClick={() => setZoom(z.id)}>{m.zoomLevel[z.id] ?? z.label}</button>)}
       </div>
-      <button className="gx-btn" onClick={scrollToToday}>Today</button>
-      <button className="gx-btn" onClick={fit}>Fit</button>
+      <button className="gx-btn" onClick={scrollToToday}>{m.today}</button>
+      <button className="gx-btn" onClick={fit}>{m.fit}</button>
     </div>
   );
 }
 
 const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const cssId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '-');
+function zoomAnchor(el: HTMLElement, sc: Scale, selection: SelectionTarget[], model: Model, today: number): { day: number; px: number } {
+  const w = el.clientWidth;
+  const onScreen = (day: number) => { const px = (day - sc.origin) * sc.pxPerDay - el.scrollLeft; return px >= 0 && px <= w ? px : null; };
+  for (const t of [...selection].reverse()) {
+    const id = t.type === 'link' ? model.doc.links.find((l) => l.id === t.linkId)?.target : t.taskId;
+    const p = id ? model.placement.byId.get(id) : undefined;
+    if (!p?.scheduled) continue;
+    const px = onScreen(p.start!);
+    if (px !== null) return { day: p.start!, px };
+  }
+  const px = onScreen(today);
+  if (px !== null) return { day: today, px };
+  return { day: (el.scrollLeft + w / 2) / sc.pxPerDay + sc.origin, px: w / 2 };
+}
+/** Today's date as YYYY-MM-DD in a time zone (falls back to UTC for an unknown zone). */
+function todayIn(timeZone: string): string {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
+  catch { return new Date().toISOString().slice(0, 10); }
+}
 const dayOfIso = (iso: string) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86_400_000);
 export const fmtDate = (d: DayNum, locale?: string) => formatDay(d, locale, { day: 'numeric', month: 'short', year: '2-digit' });
 
-function labelOf(t: SelectionTarget, m: Model) {
-  if (t.type === 'link') { const l = m.doc.links.find((x) => x.id === t.linkId); return l ? `Connector ${m.tasks.get(l.source)?.name} to ${m.tasks.get(l.target)?.name}` : 'Connector'; }
-  return m.tasks.get(t.taskId)?.name ?? t.taskId;
+function labelOf(t: SelectionTarget, mdl: Model, m: GanttMessages) {
+  if (t.type === 'link') { const l = mdl.doc.links.find((x) => x.id === t.linkId); return l ? m.connectorName(mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target) : m.typeConnector; }
+  return mdl.tasks.get(t.taskId)?.name ?? t.taskId;
 }
-function taskTip(t: Task, m: Model, locale?: string) {
-  const p = m.placement.byId.get(t.id)!;
-  return <><strong>{t.name}</strong><div>{fmtDate(p.start!, locale)} – {fmtDate(p.end!, locale)} · {p.duration} working days</div>{t.type !== 'milestone' && <div>{Math.round(p.progress * 100)}% complete</div>}</>;
+function taskTip(t: Task, mdl: Model, { t: m, locale, num, pct }: I18n) {
+  const p = mdl.placement.byId.get(t.id)!;
+  return <><strong>{t.name}</strong><div>{fmtDate(p.start!, locale)} – {fmtDate(p.end!, locale)} · {m.tipWorkingDays(num(p.duration ?? 0))}</div>{t.type !== 'milestone' && <div>{m.tipComplete(pct(p.progress))}</div>}</>;
 }
-function linkTip(l: Link, m: Model) {
-  return <><strong>{l.type}{l.lag ? ` +${l.lag}d` : ''}</strong><div>{m.tasks.get(l.source)?.name} → {m.tasks.get(l.target)?.name}</div></>;
+function linkTip(l: Link, mdl: Model, { t: m }: I18n) {
+  return <><strong>{m.linkType[l.type]}{l.lag ? ` +${l.lag}` : ''}</strong><div>{m.linkSentence[l.type](mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target)}</div></>;
 }
 export { fromDay };

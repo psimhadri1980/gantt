@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gantt.example/schema/gantt-roadmap-1.schema.json",
+  "title": "Gantt roadmap, contract gantt-roadmap/1",
+  "description": "Structure and formats of a roadmap document. Rules that JSON Schema cannot express are checked by validate() in @gantt/contract: ids are unique and references resolve, links form no cycle and do not join a summary to its own descendant, a task's end agrees with its start and duration in working time. Unknown fields are allowed so the contract can grow; validate() reports them as warnings.",
+  "type": "object",
+  "required": ["contract", "roadmap", "tasks", "links"],
+  "properties": {
+    "contract": { "const": "gantt-roadmap/1" },
+    "roadmap": {
+      "type": "object",
+      "required": ["id", "name", "version", "timeZone", "start"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/text" },
+        "version": { "type": "integer" },
+        "timeZone": { "$ref": "#/$defs/text", "description": "IANA time zone; task dates are in this zone." },
+        "start": { "$ref": "#/$defs/date" },
+        "defaultCalendar": { "$ref": "#/$defs/id" },
+        "statusDate": { "$ref": "#/$defs/date" }
+      }
+    },
+    "calendars": { "type": "array", "items": { "$ref": "#/$defs/calendar" } },
+    "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" } },
+    "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+    "resources": { "type": "array", "items": { "$ref": "#/$defs/resource" } },
+    "proposals": { "type": "array", "items": { "$ref": "#/$defs/proposal" } },
+    "access": {
+      "type": "object",
+      "required": ["subject", "rules"],
+      "properties": {
+        "subject": {
+          "type": "object", "required": ["id", "roles"],
+          "properties": { "id": { "$ref": "#/$defs/id" }, "roles": { "type": "array", "items": { "type": "string" } } }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["effect", "permissions"],
+            "properties": { "effect": { "enum": ["allow", "deny"] }, "permissions": { "type": "array", "items": { "type": "string" } } }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "text": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "ISO date YYYY-MM-DD in the roadmap's time zone." },
+    "timestamp": { "type": "string", "format": "date-time", "description": "ISO date-time in UTC." },
+    "unit": { "enum": ["day", "hour"] },
+    "calendar": {
+      "type": "object",
+      "required": ["id", "name", "workingDays"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/text" },
+        "workingDays": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1, "maximum": 7 }, "description": "ISO weekdays, 1 = Monday." },
+        "hoursPerDay": { "type": "number", "minimum": 0.5, "maximum": 24 },
+        "holidays": { "type": "array", "items": { "$ref": "#/$defs/date" } }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "name", "type", "parent"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/text" },
+        "type": { "enum": ["task", "summary", "milestone"] },
+        "parent": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "kind": { "type": "string", "description": "Host-defined kind; not checked against a list." },
+        "lane": { "type": "boolean", "description": "Draw the children as bars on this row." },
+        "hasChildren": { "type": "boolean", "description": "Children exist but are loaded on demand." },
+        "start": { "$ref": "#/$defs/date" },
+        "duration": { "type": "number", "minimum": 0, "description": "Working time in durationUnit." },
+        "durationUnit": { "$ref": "#/$defs/unit" },
+        "end": { "$ref": "#/$defs/date", "description": "Last working day, inclusive." },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mode": { "enum": ["auto", "manual", "inactive"] },
+        "owner": { "type": "string" },
+        "resources": {
+          "type": "array",
+          "items": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/id" }, "allocation": { "type": "number", "minimum": 0 } } }
+        },
+        "constraint": {
+          "type": "object", "required": ["type"],
+          "properties": { "type": { "enum": ["ASAP", "SNET", "SNLT", "FNET", "FNLT", "MSO", "MFO"] }, "date": { "$ref": "#/$defs/date" } },
+          "if": { "properties": { "type": { "not": { "const": "ASAP" } } } },
+          "then": { "required": ["date"] }
+        },
+        "deadline": { "$ref": "#/$defs/date" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "milestone" } } }, "then": { "properties": { "duration": { "const": 0 } } } },
+        { "if": { "properties": { "type": { "const": "task" } }, "required": ["start"] }, "then": { "anyOf": [{ "required": ["duration"] }, { "required": ["end"] }] } }
+      ]
+    },
+    "link": {
+      "type": "object",
+      "required": ["id", "source", "target", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "source": { "$ref": "#/$defs/id" },
+        "target": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["FS", "SS", "FF", "SF"] },
+        "kind": { "type": "string" },
+        "lag": { "type": "number" },
+        "lagUnit": { "$ref": "#/$defs/unit" }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "name": { "$ref": "#/$defs/text" },
+        "capacityFte": { "type": "number", "minimum": 0 }, "calendar": { "$ref": "#/$defs/id" }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "required": ["id", "name", "owner", "state", "baseVersion", "createdAt", "changes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "name": { "$ref": "#/$defs/text" }, "owner": { "$ref": "#/$defs/id" },
+        "state": { "type": "string" }, "baseVersion": { "type": "integer" },
+        "createdAt": { "$ref": "#/$defs/timestamp" }, "submittedAt": { "$ref": "#/$defs/timestamp" }, "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["entity", "op", "id", "by", "at"],
+            "properties": {
+              "entity": { "enum": ["task", "link", "resource", "calendar", "roadmap"] },
+              "op": { "enum": ["create", "update", "delete"] },
+              "id": { "$ref": "#/$defs/id" }, "fields": { "type": "object" },
+              "by": { "$ref": "#/$defs/id" }, "at": { "$ref": "#/$defs/timestamp" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
