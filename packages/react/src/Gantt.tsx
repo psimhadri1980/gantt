@@ -1,9 +1,11 @@
 import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel,
+  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel,
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
+  copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
+  type GanttViewState, type SavedView, type TreeClipboard,
 } from '@gantt/state';
 import { fromDay, place, schedule, whyNotLink, type DayNum, type Placement } from '@gantt/engine';
 import { checkChange, type AccessEvaluator } from '@gantt/access';
@@ -13,6 +15,9 @@ import { ContextMenu, type MenuItem } from './menu.tsx';
 import type { ScheduleResult } from '@gantt/engine';
 import { DetailsPanel, type GanttKinds } from './Details.tsx';
 import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
+import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBlock, GridHeader, PlaceholderRow, resolveColumns, type CellProps, type GridColumn } from './grid.tsx';
+import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
+import type { PlacedTask } from '@gantt/engine';
 import './gantt.css';
 
 export interface GanttProps {
@@ -72,7 +77,25 @@ export interface GanttProps {
   errorState?: (e: { message: string; retry: () => void }) => ReactNode;
   /** Loads the children of a task marked `hasChildren: true` when it is first expanded (H2). */
   loadChildren?: (taskId: string) => Promise<{ tasks: Task[]; links?: Link[] }>;
+
+  // Grid and views (Phase 5 step 2).
+  /** Extra grid columns (custom fields, D18), or built-in ones replaced by id; `cell` is a template (G7). */
+  columns?: GridColumn[];
+  /** The view: sort, filter, grouping, columns, zoom (D9–D11, D18, F12). Controlled when given. */
+  view?: GanttViewState;
+  /** The view changed (the user sorted, filtered, grouped or changed columns). */
+  onViewChanged?: (view: GanttViewState) => void;
+  /** Named views the user can pick (F12). The host stores them and may share them, for example in the URL. */
+  savedViews?: SavedView[];
+  onSavedViewsChanged?: (views: SavedView[]) => void;
+  /** Template for the content of a task bar (G7). */
+  barTemplate?: ComponentType<{ task: Task; placed: PlacedTask }>;
+  /** Template for a task's tooltip (G7); `Default` is the built-in content. */
+  tooltipTemplate?: ComponentType<{ task: Task; placed: PlacedTask; Default: ReactNode }>;
+  /** Compact mode for small screens (F5): `'auto'` (default) switches it on below 720 px. */
+  compact?: boolean | 'auto';
 }
+export type { GridColumn, CellProps, GanttViewState, SavedView };
 
 /** Imperative handle (H3): `const ref = useRef<GanttHandle>(null); <Gantt ref={ref} … />`. */
 export interface GanttHandle {
@@ -113,9 +136,12 @@ const DAY_CHUNK = 64;
 const OVERSCAN_PX = 400;
 const GRID_MIN = 160;
 
-interface Block { index: number; start: number; rows: RowLayout[] }
-interface Api {
-  select: (t: SelectionTarget, additive: boolean) => void;
+export interface Block { index: number; start: number; rows: RowLayout[] }
+export interface Api {
+  /** `rangeTo`: select every row from the anchor to this row index (Shift+click, D14). */
+  select: (t: SelectionTarget, additive: boolean, rangeTo?: number) => void;
+  addBelow: (id: string) => void;
+  rowPointerDown: (e: React.PointerEvent, row: number, id: string) => void;
   focus: (row: number, bar: number) => void;
   toggle: (id: string) => void;
   toggleLane: (id: string) => void;
@@ -125,7 +151,11 @@ interface Api {
   menu: (x: number, y: number, t: SelectionTarget) => void;
 }
 interface Compare { base: Placement; diff: Map<string, 'added' | 'changed'> }
-interface Ctx {
+export interface Ctx {
+  cols: GridColumn[]; frozen: number;
+  /** Tasks matching the filter; their ancestors are shown for context (D10). */
+  matches: ReadonlySet<string> | null;
+  barTemplate?: GanttProps['barTemplate']; tooltipTemplate?: GanttProps['tooltipTemplate'];
   model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>;
   loadState: ReadonlyMap<string, string>; compare: Compare | null; editing: string | null;
   /** Tasks on the critical path while highlighting is on (C2). */
@@ -391,12 +421,34 @@ function GanttView(props: CoreProps & {
   loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
   history: { undo: () => Promise<OperationResult | null>; redo: () => Promise<OperationResult | null>; canUndo: boolean; canRedo: boolean };
 }) {
-  const { data, kinds, locale, detailsPanel = 'right', height = 600, model, run } = props;
+  const { data, kinds, locale, detailsPanel = 'right', height = 600, run } = props;
+  const baseModel = props.model;
   const i18n = useMemo(() => makeI18n(mergeMessages(props.messages), locale), [props.messages, locale]);
   const m = i18n.t;
+  // The view (D9–D11, D18, F12): controlled by the host when it passes `view`.
+  const [vsState, setVsState] = useState<GanttViewState>(() => props.view ?? {});
+  const vs = props.view ?? vsState;
+  const onViewRef = useRef(props.onViewChanged); onViewRef.current = props.onViewChanged;
+  const setVs = useCallback((next: GanttViewState) => { setVsState(next); onViewRef.current?.(next); }, []);
+  const allCols = useMemo(() => {
+    const extra = new Map((props.columns ?? []).map((c) => [c.id, c]));
+    // A column the host passes is shown unless it says otherwise, even where it replaces a built-in hidden one.
+    const out = builtinColumns(m).map((c) => { const x = extra.get(c.id); if (x) extra.delete(c.id); return x ? { ...c, hidden: false, ...x } : c; });
+    out.splice(out.length - 1, 0, ...extra.values());
+    return out;
+  }, [m, props.columns]);
+  const cols = useMemo(() => resolveColumns(allCols, vs.columns), [allCols, vs.columns]);
+  const frozen = Math.min(vs.frozen ?? 0, cols.length);
+  const fieldLabel = useCallback((f: string) => allCols.find((c) => c.field === f)?.label ?? f, [allCols]);
+  const shown = useMemo(() => viewModel(baseModel, vs, (f, v) => `${fieldLabel(f)}: ${v === '' ? m.emptyValue : f === 'start' || f === 'end' ? fmtDate(Number(v), locale) : v}`), [baseModel, vs, fieldLabel, m, locale]);
+  const model = shown.model;
+  /** Rows follow tree order: moving rows by dragging makes sense only then. */
+  const treeOrder = !vs.sort && !vs.groupBy;
+  const [narrow, setNarrow] = useState(false);
+  const compact = props.compact === true || vs.compact === true || ((props.compact ?? 'auto') === 'auto' && narrow);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [laneOpen, setLaneOpen] = useState<Set<string>>(() => new Set());
-  const sizes = useMemo<RowSizes>(() => ({ row: props.rowHeight ?? DEFAULT_SIZES.row, laneTrack: props.laneTrackHeight ?? DEFAULT_SIZES.laneTrack }), [props.rowHeight, props.laneTrackHeight]);
+  const sizes = useMemo<RowSizes>(() => ({ row: props.rowHeight ?? (compact ? 30 : DEFAULT_SIZES.row), laneTrack: props.laneTrackHeight ?? DEFAULT_SIZES.laneTrack }), [props.rowHeight, props.laneTrackHeight, compact]);
   const levels = props.zoomLevels?.length ? props.zoomLevels : ZOOM_LEVELS;
   const rows = useMemo(() => layoutRows(model, collapsed, laneOpen, sizes), [model, collapsed, laneOpen, sizes]);
   const bars = useMemo(() => barIndex(rows, sizes), [rows, sizes]);
@@ -436,6 +488,11 @@ function GanttView(props: CoreProps & {
   // Scroll position, quantised to blocks and day chunks.
   const chartRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = rootRef.current; if (!el) return;
+    const ro = new ResizeObserver(([e]) => { if (e) setNarrow(e.contentRect.width < 720); });
+    ro.observe(el); return () => ro.disconnect();
+  }, []);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   // b0..b1 and c0..c1 include the overscan margin; v0..v1 and t0..t1 are what is actually on screen.
@@ -575,9 +632,24 @@ function GanttView(props: CoreProps & {
     set((c) => { if (c.has(id) === on) return c; const n = new Set(c); on ? n.add(id) : n.delete(id); return n; });
   const selRef = useRef({ selection, selKeys, model }); selRef.current = { selection, selKeys, model };
   const i18nRef = useRef(i18n); i18nRef.current = i18n;
-  const doSelect = useCallback((t: SelectionTarget, additive: boolean) => {
+  const anchor = useRef<string | null>(null);
+  const doSelect = useCallback((t: SelectionTarget, additive: boolean, rangeTo?: number) => {
     const { selection: cur, selKeys: keys, model: mdl } = selRef.current;
-    const next = additive ? (keys.has(targetKey(t)) ? cur.filter((s) => targetKey(s) !== targetKey(t)) : [...cur, t]) : [t];
+    let next: SelectionTarget[];
+    if (rangeTo !== undefined && t.type === 'row') {
+      // Shift+click selects every row from the anchor to here (D14); Ctrl adds the range to the selection.
+      const rs = geom.current.rows;
+      const a = anchor.current ? rs.findIndex((r) => r.taskId === anchor.current) : -1;
+      const lo = a < 0 ? rangeTo : Math.min(a, rangeTo), hi = a < 0 ? rangeTo : Math.max(a, rangeTo);
+      const range: SelectionTarget[] = rs.slice(lo, hi + 1).filter((r) => !isGroupId(r.taskId)).map((r) => ({ type: 'row', taskId: r.taskId }));
+      const inRange = new Set(range.map(targetKey));
+      next = additive ? [...cur.filter((s) => !inRange.has(targetKey(s))), ...range] : range;
+      // The clicked row is the primary one.
+      const ci = next.findIndex((s) => targetKey(s) === targetKey(t)); if (ci >= 0) next.push(...next.splice(ci, 1));
+    } else {
+      next = additive ? (keys.has(targetKey(t)) ? cur.filter((s) => targetKey(s) !== targetKey(t)) : [...cur, t]) : [t];
+      if (t.type !== 'link') anchor.current = t.taskId;
+    }
     select(next);
     const tx = i18nRef.current;
     const name = labelOf(t, mdl, tx.t);
@@ -587,12 +659,15 @@ function GanttView(props: CoreProps & {
   const tipRef = useRef<(s: TipState | null) => void>(() => {});
   const menuRef = useRef<(x: number, y: number, t: SelectionTarget) => void>(() => {});
   const apiRef = useRef<Api>(null!);
+  const actRef = useRef<{ addBelow: (id: string) => void; rowPointerDown: (e: React.PointerEvent, i: number, id: string) => void }>(null!);
   const editRef = useRef<{ whyNotEdit: (id: string, f: string) => string | null; editTask: (id: string, f: Partial<Task>) => Promise<OperationResult> }>(null!);
   const api = useMemo<Api>(() => ({
     startEdit: (id) => { if (editRef.current.whyNotEdit(id, 'name') === null) setEditing(id); },
     menu: (x, y, t) => menuRef.current(x, y, t),
     finishEdit: (id, value) => { setEditing(null); if (value !== null && value.trim()) void editRef.current.editTask(id, { name: value.trim() }); },
     select: doSelect, focus: (row, bar) => setFocus((f) => (f.row === row && f.bar === bar ? f : { row, bar })), toggle, toggleLane,
+    addBelow: (id) => actRef.current.addBelow(id),
+    rowPointerDown: (e, i, id) => actRef.current.rowPointerDown(e, i, id),
     tip: (x, y, content) => tipRef.current(content == null ? null : { x, y, content }),
   }), [doSelect, toggle, toggleLane]);
   const scrollToTask = useCallback((id: string) => {
@@ -674,25 +749,29 @@ function GanttView(props: CoreProps & {
   }, [data, props.evaluator, run, i18n]);
   apiRef.current = api;
   menuRef.current = (x, y, t) => openMenuRef.current(x, y, t);
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical }), [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical]);
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate }),
+    [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate]);
   // What the user may change, with the reason when not (F14, L4).
   const whyNotEdit = useCallback((taskId: string, field: string): string | null => {
     const ro = props.readOnly;
     if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
     const t = model.tasks.get(taskId);
     if (!t) return i18n.t.noLongerExists;
+    if (isGroupId(taskId)) return i18n.t.groupedBy(fieldLabel(vs.groupBy ?? ''));
     if ((t.type === 'summary' || (model.children.get(taskId)?.length ?? 0) > 0) && ['start', 'end', 'duration', 'progress'].includes(field)) return i18n.t.derivedDates;
     const ev = props.evaluator;
     if (!ev) return null;
     const d = checkChange(ev, { entity: 'task', op: 'update', id: taskId, fields: { [field]: null } }, t as never, data.roadmap.id);
     return d.allowed ? null : d.reason!;
-  }, [props.readOnly, props.evaluator, model, data.roadmap.id, i18n]);
+  }, [props.readOnly, props.evaluator, model, data.roadmap.id, i18n, fieldLabel, vs.groupBy]);
   const editTask = useCallback((taskId: string, fields: Partial<Task>) => run({ type: 'task.update', id: taskId, fields }, 'user'), [run]);
   const whyNotLinkEdit = useCallback(() => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
     return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? 'Missing permission: link.modify' : null;
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   const editLink = useCallback((id: string, fields: Partial<Link>) => run({ type: 'link.update', id, fields }, 'user').then((r) => { if (!r.ok) setAnnounce(r.reason); }), [run]);
+  const editMany = useCallback((ids: string[], fields: Partial<Task>) => run({ type: 'batch', label: 'bulk', ops: ids.map((id) => ({ type: 'task.update' as const, id, fields })) }, 'user')
+    .then((r) => { if (!r.ok) { setNotice(r.reason); setAnnounce(r.reason); } }), [run]);
   editRef.current = { whyNotEdit, editTask };
 
   // ---------- Editing on the chart (Phase 5) ----------
@@ -738,6 +817,148 @@ function GanttView(props: CoreProps & {
     if (!ops.length) { const id = editTargets()[0]; if (id) ops.push({ type: 'task.delete', id }); }
     if (ops.length) { commit(ops.length === 1 ? ops[0]! : { type: 'batch', ops }); select([]); }
   };
+  // ---------- Tree editing (D2, D3, D4, D15, D16) ----------
+  type TreeOut = { ops: DataOperation[]; ids?: string[] } | { error: string };
+  const runTree = (r: TreeOut, label: string, after?: (ids?: string[]) => void) => {
+    if ('error' in r) { say(r.error); return; }
+    if (!r.ops.length) return;
+    void run({ type: 'batch', ops: r.ops, label }, 'user').then((x) => { if (!x.ok) say(x.reason); else after?.(r.ids); });
+  };
+  /** Selected tasks (not connectors or group rows), else the focused one. */
+  const selectedTasks = (): string[] => editTargets().filter((id) => !isGroupId(id) && baseModel.tasks.has(id));
+  const whyNotMove = (ids: string[]) => ids.map((id) => whyNotEdit(id, 'parent')).find((w) => w) ?? null;
+  const addTask = (parent: string | null, index: number, name?: string, near?: string) => {
+    const why = whyNotCreate(parent ?? ''); if (why) { say(why); return; }
+    const ref = near ? baseModel.placement.byId.get(near) : undefined;
+    const cal = baseModel.placement.calendar;
+    const id = newId();
+    const r = newTaskOps(baseModel, parent, index, { id, name: name ?? m.newTask, type: 'task', start: fromDay(cal.nextWorking(ref?.scheduled ? ref.start! : todayDay)), duration: 1 });
+    runTree(r, 'add', () => {
+      select([{ type: 'row', taskId: id }]);
+      scrollToTask(id);
+      if (!name) setTimeout(() => setEditing(id), 0); // name it straight away (D3)
+    });
+  };
+  const addBelow = (id: string) => {
+    const t = baseModel.tasks.get(id); if (!t) return;
+    const sibs = baseModel.children.get(t.parent) ?? [];
+    addTask(t.parent, sibs.indexOf(id) + 1, undefined, id);
+  };
+  const addChild = (id: string) => addTask(id, baseModel.children.get(id)?.length ?? 0, undefined, id);
+  const addFromPlaceholder = (name: string) => {
+    // Quick entry (D4): at the end of the selected summary, else at the end of the top level.
+    const p = selection[selection.length - 1];
+    const into = p && p.type === 'row' && (baseModel.children.get(p.taskId)?.length ?? 0) > 0 ? p.taskId : null;
+    addTask(into, baseModel.children.get(into)?.length ?? 0, name, into ?? undefined);
+  };
+  const clip = useRef<{ clip: TreeClipboard; cut: boolean } | null>(null);
+  const copySel = (cut: boolean) => {
+    const ids = selectedTasks(); if (!ids.length) return;
+    if (cut) { const why = whyNotMove(ids); if (why) { say(why); return; } }
+    const c = copyTasks(baseModel, ids);
+    clip.current = { clip: c, cut };
+    say(m.copied(i18n.num(c.roots.length)));
+    try { void navigator.clipboard?.writeText(JSON.stringify({ gantt: 'tasks', tasks: c.tasks, links: c.links })).catch(() => {}); } catch { /* no clipboard access */ }
+  };
+  /** Where a paste or duplicate lands: after the selected task, among its siblings; else at the end. */
+  const pastePlace = (): { parent: string | null; index: number } => {
+    const p = selectedTasks().at(-1);
+    const t = p ? baseModel.tasks.get(p) : undefined;
+    if (!t) return { parent: null, index: baseModel.children.get(null)?.length ?? 0 };
+    return { parent: t.parent, index: (baseModel.children.get(t.parent) ?? []).indexOf(t.id) + 1 };
+  };
+  const pasteSel = () => {
+    const c = clip.current; if (!c) { say(m.nothingToPaste); return; }
+    const { parent, index } = pastePlace();
+    if (c.cut) {
+      // Cut and paste moves the tasks: ids, links and history stay.
+      const ids = c.clip.roots.filter((id) => baseModel.tasks.has(id));
+      clip.current = null;
+      runTree(moveOps(baseModel, ids, parent, index), 'move', () => say(m.moved(ids.map((id) => baseModel.tasks.get(id)?.name ?? id).join(', '))));
+      return;
+    }
+    const why = whyNotCreate(parent ?? ''); if (why) { say(why); return; }
+    runTree(pasteOps(baseModel, c.clip, parent, index, () => newId()), 'paste', (ids) => {
+      if (ids?.length) { select(ids.map((id) => ({ type: 'row' as const, taskId: id }))); say(m.pasted(i18n.num(ids.length))); }
+    });
+  };
+  const duplicateSel = () => {
+    const ids = selectedTasks(); if (!ids.length) return;
+    const why = whyNotCreate(''); if (why) { say(why); return; }
+    runTree(duplicateOps(baseModel, ids, () => newId()), 'duplicate', (n) => { if (n?.length) select(n.map((id) => ({ type: 'row' as const, taskId: id }))); });
+  };
+  const indentSel = (out: boolean) => {
+    const ids = selectedTasks(); if (!ids.length) return;
+    const why = whyNotMove(ids); if (why) { say(why); return; }
+    runTree(out ? outdentOps(baseModel, ids) : indentOps(baseModel, ids), out ? 'outdent' : 'indent', () => { for (const id of ids) scrollToTask(id); });
+  };
+  /** Dragging rows in the grid by their WBS cell (D2): before or after a row, or onto it to make it the parent. */
+  const rowPointerDown = (e: React.PointerEvent, _i: number, id: string) => {
+    if (e.button !== 0 || !(e.target as HTMLElement).closest('.gx-grip') || isGroupId(id)) return;
+    const body = gridBodyRef.current; if (!body) return;
+    const ids = selKeys.has(`row:${id}`) ? selectedTasks() : [id];
+    const y0 = e.clientY;
+    let started = false, ind: HTMLDivElement | null = null, target: { parent: string | null; index: number } | null = null;
+    const done = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); ind?.remove(); body.classList.remove('gx-row-dragging'); };
+    const mv = (ev: PointerEvent) => {
+      if (!started) {
+        if (Math.abs(ev.clientY - y0) < 5) return;
+        if (!treeOrder) { say(m.reorderNeedsTree); done(); return; }
+        const why = whyNotMove(ids); if (why) { say(why); done(); return; }
+        started = true;
+        ind = document.createElement('div'); ind.className = 'gx-drop-ind';
+        body.firstElementChild!.appendChild(ind); body.classList.add('gx-row-dragging');
+      }
+      const y = ev.clientY - body.getBoundingClientRect().top + body.scrollTop;
+      const rs = geom.current.rows; const k = rowAt(rs, y);
+      const place = (cls: string, top: number, h?: number) => { ind!.className = `gx-drop-ind${cls}`; ind!.style.top = `${top}px`; ind!.style.height = h ? `${h}px` : ''; };
+      if (k >= rs.length) { target = { parent: null, index: baseModel.children.get(null)?.length ?? 0 }; place('', totalHeight(rs)); return; }
+      const r = rs[k]!; const t = baseModel.tasks.get(r.taskId);
+      if (!t) { target = null; return; }
+      const f = (y - r.top) / r.height;
+      const sibs = baseModel.children.get(t.parent) ?? [];
+      if (f < 0.3) { target = { parent: t.parent, index: sibs.indexOf(t.id) }; place('', r.top); }
+      else if (f > 0.7) {
+        target = r.hasChildren && r.expanded && !r.lane ? { parent: t.id, index: 0 } : { parent: t.parent, index: sibs.indexOf(t.id) + 1 };
+        place('', r.top + r.height);
+      } else if (t.type === 'milestone' || ids.includes(t.id)) { target = null; place(' gx-drop-none', r.top, r.height); }
+      else { target = { parent: t.id, index: baseModel.children.get(t.id)?.length ?? 0 }; place(' gx-drop-into', r.top, r.height); }
+    };
+    const up = () => {
+      done();
+      if (!started || !target) return;
+      const names = ids.map((x) => baseModel.tasks.get(x)?.name ?? x).join(', ');
+      runTree(moveOps(baseModel, ids, target.parent, target.index), 'move', () => say(m.moved(names)));
+    };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  };
+  actRef.current = { addBelow, rowPointerDown };
+  /** Shift+drag on empty chart space selects every bar inside the rectangle (D14). */
+  const startLasso = (e: React.PointerEvent) => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const rect0 = canvas.getBoundingClientRect();
+    const x0 = e.clientX - rect0.left, y0 = e.clientY - rect0.top;
+    const box = document.createElement('div'); box.className = 'gx-lasso'; canvas.appendChild(box);
+    let x1 = x0, y1 = y0;
+    const mv = (ev: PointerEvent) => {
+      const r = canvas.getBoundingClientRect(); x1 = ev.clientX - r.left; y1 = ev.clientY - r.top;
+      Object.assign(box.style, { left: `${Math.min(x0, x1)}px`, top: `${Math.min(y0, y1)}px`, width: `${Math.abs(x1 - x0)}px`, height: `${Math.abs(y1 - y0)}px` });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); box.remove();
+      const lx = Math.min(x0, x1), rx = Math.max(x0, x1), ty = Math.min(y0, y1), by = Math.max(y0, y1);
+      if (rx - lx < 3 && by - ty < 3) return;
+      const sc = geom.current.scale; const out: SelectionTarget[] = [];
+      for (const [id, pos] of bars) {
+        const p = model.placement.byId.get(id); if (!p?.scheduled || isGroupId(id)) continue;
+        const x = xOf(sc, p.start!), w = (p.end! - p.start! + 1) * sc.pxPerDay;
+        if (x < rx && x + w > lx && pos.y < by && pos.y + pos.h > ty) out.push(pos.row.lane ? { type: 'bar', taskId: id, bar: 'main' } : { type: 'row', taskId: id });
+      }
+      select(out); say(m.selectedBars(i18n.num(out.length)));
+    };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  };
+
   // Drawing a dependency with the keyboard (F9): L on the predecessor, then Enter on the successor.
   const [linkFrom, setLinkFrom] = useState<string | null>(null);
   const startKeyboardLink = (id: string) => { setLinkFrom(id); say(m.linkStart(model.tasks.get(id)?.name ?? id)); };
@@ -756,6 +977,16 @@ function GanttView(props: CoreProps & {
     if (mod && e.key.toLowerCase() === 'y') { void props.history.redo(); return true; }
     if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { shiftTasks(editTargets(), e.key === 'ArrowLeft' ? -1 : 1, e.shiftKey); return true; }
     if (e.key === 'Delete' || (e.key === 'Backspace' && mod)) { deleteSelection(); return true; }
+    if (mod && !e.altKey && !e.shiftKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'c') { copySel(false); return true; }
+      if (k === 'x') { copySel(true); return true; }
+      if (k === 'v') { pasteSel(); return true; }
+      if (k === 'd') { duplicateSel(); return true; }
+      if (e.key === ']') { indentSel(false); return true; }
+      if (e.key === '[') { indentSel(true); return true; }
+    }
+    if (e.key === 'Insert') { const id = selectedTasks()[0]; if (id) addBelow(id); else addTask(null, baseModel.children.get(null)?.length ?? 0); return true; }
     if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
       const r = rows[focus.row]; const el = gridBodyRef.current?.querySelector<HTMLElement>(`[data-row="${focus.row}"]`);
       if (r) { const b = el?.getBoundingClientRect(); openMenu(b ? b.left + 40 : 100, b ? b.bottom : 100, targetFor(r, focus.bar)); }
@@ -783,12 +1014,25 @@ function GanttView(props: CoreProps & {
       ];
     }
     const id = t.taskId;
+    if (isGroupId(id)) return [];
     const isSum = (model.children.get(id)?.length ?? 0) > 0;
+    const whyCreate = whyNotCreate('');
+    const whyMoveIt = whyNotMove([id]);
+    const name = model.tasks.get(id)?.name ?? id;
     return [
       { label: m.editDetails, shortcut: 'F6', run: () => rootRef.current?.querySelector<HTMLElement>('.gx-details input, .gx-details button')?.focus() },
       { label: m.moveEarlier, shortcut: 'Alt+←', why: isSum ? m.derivedDates : whyNotEdit(id, 'start'), run: () => shiftTasks([id], -1, false) },
       { label: m.moveLater, shortcut: 'Alt+→', why: isSum ? m.derivedDates : whyNotEdit(id, 'start'), run: () => shiftTasks([id], 1, false) },
       { label: m.linkFromHere, shortcut: 'L', why: whyNotLinkFor(id, id, 'FS') === 'A task cannot depend on itself' ? null : whyNotLinkFor(id, id, 'FS'), run: () => startKeyboardLink(id) },
+      { separator: true, label: '' },
+      { label: m.addBelow(name), shortcut: 'Insert', why: whyCreate, run: () => addBelow(id) },
+      { label: m.addChild, why: whyCreate ?? (model.tasks.get(id)?.type === 'milestone' ? 'A milestone cannot contain tasks' : null), run: () => addChild(id) },
+      { label: m.cut, shortcut: 'Ctrl+X', why: whyMoveIt, run: () => copySel(true) },
+      { label: m.copy, shortcut: 'Ctrl+C', run: () => copySel(false) },
+      { label: m.paste, shortcut: 'Ctrl+V', why: clip.current ? null : m.nothingToPaste, run: pasteSel },
+      { label: m.duplicate, shortcut: 'Ctrl+D', why: whyCreate, run: duplicateSel },
+      { label: m.indent, shortcut: 'Ctrl+]', why: whyMoveIt, run: () => indentSel(false) },
+      { label: m.outdent, shortcut: 'Ctrl+[', why: whyMoveIt, run: () => indentSel(true) },
       { separator: true, label: '' },
       { label: m.undo, shortcut: 'Ctrl+Z', why: props.history.canUndo ? null : m.nothingToUndo, run: () => void props.history.undo() },
       { label: m.redo, shortcut: 'Ctrl+Y', why: props.history.canRedo ? null : m.nothingToRedo, run: () => void props.history.redo() },
@@ -846,6 +1090,7 @@ function GanttView(props: CoreProps & {
         if (id) openMenu(x, y, { type: 'row', taskId: id });
       }, 550);
     }
+    if (bar && e.shiftKey && !bar.classList.contains('gx-summary')) return; // Shift+click adds to the selection
     if (bar && !bar.classList.contains('gx-summary')) {
       const kind = (handle?.dataset.drag ?? 'move') as DragKind;
       if (kind === 'move' && whyNotEdit(bar.dataset.task!, 'start')) return; // a click, not a drag
@@ -854,7 +1099,8 @@ function GanttView(props: CoreProps & {
     }
     if (el.closest('.gx-link-hit')) return;
     const laneBg = el.closest<HTMLElement>('.gx-rowbg.gx-lane[data-task]');
-    if (laneBg && !whyNotCreate(laneBg.dataset.task!) && drag.begin(e, 'create', laneBg.dataset.task!, null)) { e.preventDefault(); chartRef.current?.focus({ preventScroll: true }); return; }
+    if (e.shiftKey) { e.preventDefault(); startLasso(e); return; }
+    if (laneBg && !isGroupId(laneBg.dataset.task!) && !whyNotCreate(laneBg.dataset.task!) && drag.begin(e, 'create', laneBg.dataset.task!, null)) { e.preventDefault(); chartRef.current?.focus({ preventScroll: true }); return; }
     const c = chartRef.current!; pan.current = { x: e.clientX, y: e.clientY, l: c.scrollLeft, t: c.scrollTop, moved: false };
   };
   const whyNotCreate = (parent: string) => {
@@ -908,11 +1154,13 @@ function GanttView(props: CoreProps & {
   };
   useEffect(() => { // keep DOM focus on the focused row when it is rendered
     const el = gridBodyRef.current?.querySelector<HTMLElement>(`[data-row="${focus.row}"]`);
-    if (el && gridBodyRef.current?.contains(document.activeElement)) el.focus({ preventScroll: true });
+    const active = document.activeElement;
+    // Not while the user types in the grid (inline name editor, quick entry).
+    if (el && gridBodyRef.current?.contains(active) && !(active instanceof HTMLInputElement)) el.focus({ preventScroll: true });
   }, [focus, view.b0, view.b1]);
 
   // Panes (F4).
-  const [gridW, setGridW] = useState(360);
+  const [gridW, setGridW] = useState(400);
   const [gridHidden, setGridHidden] = useState(false);
   const startSplit = (e: React.PointerEvent) => {
     const x0 = e.clientX, w0 = gridW;
@@ -928,6 +1176,74 @@ function GanttView(props: CoreProps & {
     const i = id ? rowIndexOf.get(id) ?? rowIndexOf.get(m.tasks.get(id)?.parent ?? '') : undefined;
     if (i !== undefined) ensureVisible(i);
   }, [select, linkById, rowIndexOf, ensureVisible]);
+
+  // ---------- View tools (D9–D11, D18, D19, F12) ----------
+  const [findOpen, setFindOpen] = useState(false);
+  const [found, setFound] = useState<{ ids: string[]; i: number }>({ ids: [], i: -1 });
+  const findInput = useRef<HTMLInputElement>(null);
+  const openFind = () => { setFindOpen(true); requestAnimationFrame(() => findInput.current?.focus()); };
+  const goFound = (ids: string[], i: number) => { const id = ids[i]; if (!id) return; select([{ type: 'row', taskId: id }]); scrollToTask(id); };
+  const [pop, setPop] = useState<{ kind: 'columns' | 'filter'; x: number; y: number; col?: GridColumn } | null>(null);
+  const [colMenu, setColMenu] = useState<{ col: GridColumn; x: number; y: number } | null>(null);
+  const setColumns = (next: GridColumn[], fr = frozen) => setVs({ ...vs, columns: columnState(allCols, next), frozen: fr });
+  const onSort = (c: GridColumn) => {
+    if (!c.field) return;
+    const cur = vs.sort?.field === c.field ? vs.sort.dir : undefined;
+    setVs({ ...vs, sort: cur === 'asc' ? { field: c.field, dir: 'desc' } : cur === 'desc' ? undefined : { field: c.field, dir: 'asc' } });
+  };
+  const colMenuItems = (c: GridColumn): MenuItem[] => {
+    const i = cols.findIndex((x) => x.id === c.id);
+    const sortedHere = vs.sort?.field === c.field;
+    const f = c.field;
+    return [
+      ...(f ? [
+        { label: m.sortAsc, checked: sortedHere && vs.sort?.dir === 'asc', run: () => setVs({ ...vs, sort: { field: f, dir: 'asc' } }) },
+        { label: m.sortDesc, checked: sortedHere && vs.sort?.dir === 'desc', run: () => setVs({ ...vs, sort: { field: f, dir: 'desc' } }) },
+        { label: m.sortClear, why: vs.sort ? null : m.sortClear, run: () => setVs({ ...vs, sort: undefined }) },
+        { separator: true, label: '' },
+        { label: m.groupByCol, checked: vs.groupBy === f, run: () => setVs({ ...vs, groupBy: vs.groupBy === f ? undefined : f }) },
+        { label: `${m.filterValues}…`, run: () => setPop({ kind: 'filter', x: colMenu?.x ?? 100, y: colMenu?.y ?? 100, col: c }) },
+        { separator: true, label: '' },
+      ] as MenuItem[] : []),
+      { label: m.moveLeft, why: i <= 0 ? m.moveLeft : null, run: () => { const n = [...cols]; [n[i - 1], n[i]] = [n[i]!, n[i - 1]!]; setColumns(n); } },
+      { label: m.moveRight, why: i >= cols.length - 2 ? m.moveRight : null, run: () => { const n = [...cols]; [n[i + 1], n[i]] = [n[i]!, n[i + 1]!]; setColumns(n); } },
+      { label: m.freezeTo, checked: frozen === i + 1, run: () => setColumns(cols, frozen === i + 1 ? 0 : i + 1) },
+      { label: m.hideColumn, why: c.id === 'name' ? m.colName : null, run: () => setColumns(cols.filter((x) => x.id !== c.id), Math.min(frozen, cols.length - 1)) },
+    ];
+  };
+  const filterValuesOf = (field: string): { value: string; label: string }[] => {
+    const seen = new Map<string, string>();
+    for (const id of baseModel.tasks.keys()) {
+      const v = fieldValue(baseModel, id, field);
+      const k = v === undefined || v === null ? '' : String(v);
+      if (!seen.has(k)) seen.set(k, k === '' ? '' : field === 'start' || field === 'end' ? fmtDate(Number(k), locale) : field === 'progress' ? i18n.pct(Number(k)) : k);
+      if (seen.size >= 200) break;
+    }
+    return [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.value === '' ? 1 : b.value === '' ? -1 : a.label.localeCompare(b.label, locale, { numeric: true }));
+  };
+  const [savedState, setSavedState] = useState<SavedView[]>([]);
+  const saved = props.savedViews ?? savedState;
+  const setSaved = (v: SavedView[]) => { setSavedState(v); props.onSavedViewsChanged?.(v); };
+  const [viewId, setViewId] = useState<string | null>(null);
+  const pickView = (id: string | null) => {
+    setViewId(id);
+    const v = id ? saved.find((x) => x.id === id)?.view : undefined;
+    setVs(v ? { ...v } : {});
+    if (v?.zoom && v.zoom !== zoom) setZoom(v.zoom);
+  };
+  const saveView = (name: string) => {
+    const id = newId('v');
+    setSaved([...saved, { id, name, view: { ...vs, columns: columnState(allCols, cols), frozen, zoom } }]);
+    setViewId(id);
+  };
+  const deleteView = (id: string) => { setSaved(saved.filter((v) => v.id !== id)); setViewId(null); };
+  const matchCount = shown.matches ? [...shown.matches].filter((id) => baseModel.tasks.has(id)).length : 0;
+  const filterActive = !!shown.matches;
+  const gridHeadRef = useRef<HTMLDivElement>(null);
+  const hscrollRef = useRef<HTMLDivElement>(null);
+  const gw = gridWidth(cols);
+  const [gridOnCompact, setGridOnCompact] = useState(false);
+  const gridOff = compact ? !gridOnCompact : gridHidden;
 
   const Toolbar = props.toolbar === false ? null : props.toolbar ?? DefaultToolbar;
   const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
@@ -964,8 +1280,9 @@ function GanttView(props: CoreProps & {
 
   return (
     <I18nContext.Provider value={i18n}>
-    <div ref={rootRef} className={`gx-root gx-details-${detailsPanel || 'none'}`} {...themeAttr} style={{ height }}
+    <div ref={rootRef} className={`gx-root gx-details-${compact ? 'sheet' : detailsPanel || 'none'}${compact ? ' gx-compact' : ''}`} {...themeAttr} style={{ height }}
       onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); return; }
         if (e.key !== 'F6' || !(e.target as HTMLElement).closest('.gx-details')) return;
         e.preventDefault();
         gridBodyRef.current?.querySelector<HTMLElement>('[role="row"][tabindex="0"]')?.focus();
@@ -979,28 +1296,58 @@ function GanttView(props: CoreProps & {
           <button className="gx-btn" aria-disabled={!props.history.canRedo || undefined} title={props.history.canRedo ? `${m.redo} (Ctrl+Y)` : m.nothingToRedo} onClick={() => void props.history.redo()}>{m.redo}</button>
           {(scheduleNote || notice) && <span className="gx-muted gx-notice" role="status">{notice || scheduleNote}</span>}
           {linkFrom && <span className="gx-chip gx-link-mode">{m.linkModeHint}</span>}
-          <button className="gx-btn" onClick={() => setGridHidden((h) => !h)} aria-pressed={!gridHidden}>{gridHidden ? m.showGrid : m.hideGrid}</button>
+          <input className="gx-input gx-filter" type="search" aria-label={m.filterLabel} placeholder={m.filterLabel} value={vs.filter?.text ?? ''}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => setVs({ ...vs, filter: { ...vs.filter, text: e.target.value } })} />
+          {findOpen
+            ? <FindBar inputRef={findInput} count={found.ids.length} index={found.i}
+                onQuery={(q) => { const ids = findTasks(baseModel, q); setFound({ ids, i: ids.length ? 0 : -1 }); goFound(ids, 0); }}
+                onStep={(d) => { const n = found.ids.length; if (!n) return; const i = (found.i + d + n) % n; setFound({ ids: found.ids, i }); goFound(found.ids, i); }}
+                onClose={() => { setFindOpen(false); setFound({ ids: [], i: -1 }); }} />
+            : <button className="gx-btn" title={`${m.find} (Ctrl+F)`} onClick={openFind}>{m.find}</button>}
+          <button className="gx-btn" aria-haspopup="dialog" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPop({ kind: 'columns', x: r.left, y: r.bottom + 4 }); }}>{m.columns}</button>
+          <ViewPicker views={saved} current={viewId} onPick={pickView} onSave={saveView} onDelete={deleteView} />
+          {vs.sort && <span className="gx-chip">{m.sortedBy(fieldLabel(vs.sort.field), vs.sort.dir)}<button className="gx-chip-x" aria-label={m.sortClear} onClick={() => setVs({ ...vs, sort: undefined })}>×</button></span>}
+          {vs.groupBy && <span className="gx-chip">{m.groupedBy(fieldLabel(vs.groupBy))}
+            <label className="gx-chip-opt"><input type="checkbox" checked={!!vs.groupLanes} onChange={(e) => setVs({ ...vs, groupLanes: e.target.checked || undefined })} /> {m.groupLanes}</label>
+            <button className="gx-chip-x" aria-label={m.ungroup} onClick={() => setVs({ ...vs, groupBy: undefined, groupLanes: undefined })}>×</button></span>}
+          {filterActive && <span className="gx-chip" role="status">{m.filtered(i18n.num(matchCount), i18n.num(baseModel.tasks.size))}<button className="gx-chip-x" aria-label={m.filterClear} onClick={() => setVs({ ...vs, filter: undefined })}>×</button></span>}
+          <button className="gx-btn" aria-pressed={compact} onClick={() => setVs({ ...vs, compact: !compact || undefined })}>{m.compact}</button>
+          <button className="gx-btn" onClick={() => compact ? setGridOnCompact((v) => !v) : setGridHidden((h) => !h)} aria-pressed={!gridOff}>{gridOff ? m.showGrid : m.hideGrid}</button>
           {props.saveState && <SaveIndicator state={props.saveState} />}
         </div>
       )}
       <div className="gx-main">
         <div className="gx-panes">
-          {!gridHidden && (
-            <div className="gx-grid" style={{ width: gridW }}>
-              <div className="gx-grid-inner" role="treegrid" aria-label={data.roadmap.name} aria-rowcount={rows.length + 1} aria-multiselectable="true">
-              <div className="gx-grid-head" role="row" aria-rowindex={1}>
-                <span className="gx-col-wbs" role="columnheader">{m.colWbs}</span>
-                <span className="gx-col-name" role="columnheader">{m.colName}</span>
-                <span className="gx-col-date" role="columnheader">{m.colStart}</span>
-                <span className="gx-col-dur" role="columnheader">{m.colDays}</span>
-              </div>
-              <div className="gx-grid-body" ref={gridBodyRef} role="rowgroup" onKeyDown={onKeyDown}
-                onWheel={(e) => { if (chartRef.current) chartRef.current.scrollTop += e.deltaY; }}>
-                <div style={{ height: H, position: 'relative' }}>
-                  {visibleBlocks.map((b) => <GridBlock key={b.index} block={b} ctx={ctx} api={api}
-                    focusRow={focus.row >= b.start && focus.row < b.start + BLOCK ? focus.row : -1} />)}
+          {!gridOff && (
+            <div className="gx-grid" style={{ width: compact ? Math.min(gridW, 240) : gridW }}>
+              <div className="gx-grid-inner" role="treegrid" aria-label={data.roadmap.name} aria-rowcount={rows.length + 2} aria-multiselectable="true"
+                style={{ ['--gx-cols' as string]: gridTemplate(cols) }}>
+              <div className="gx-grid-headwrap" ref={gridHeadRef}>
+                <div className="gx-grid-head" role="row" aria-rowindex={1} style={{ minWidth: gw }}>
+                  <GridHeader cols={cols} frozen={frozen} sort={vs.sort} onSort={onSort}
+                    onResize={(id, w) => setColumns(cols.map((c) => (c.id === id ? { ...c, width: w } : c)))}
+                    onReorder={(id, before) => { const c = cols.find((x) => x.id === id)!; const rest = cols.filter((x) => x.id !== id); const at = before ? rest.findIndex((x) => x.id === before) : rest.length; rest.splice(at < 0 ? rest.length : at, 0, c); setColumns(rest); }}
+                    onMenu={(col, x, y) => setColMenu({ col, x, y })} />
                 </div>
               </div>
+              <div className="gx-grid-body" ref={gridBodyRef} role="rowgroup" onKeyDown={onKeyDown}
+                onWheel={(e) => {
+                  if ((e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) && hscrollRef.current) { hscrollRef.current.scrollLeft += e.deltaX || e.deltaY; return; }
+                  if (chartRef.current) chartRef.current.scrollTop += e.deltaY;
+                }}>
+                <div style={{ height: H + sizes.row, position: 'relative', minWidth: gw }}>
+                  {visibleBlocks.map((b) => <GridBlock key={b.index} block={b} ctx={ctx} api={api}
+                    focusRow={focus.row >= b.start && focus.row < b.start + BLOCK ? focus.row : -1} />)}
+                  <PlaceholderRow top={H} height={sizes.row} rowIndex={rows.length + 2} why={whyNotCreate('')} onAdd={addFromPlaceholder} />
+                </div>
+              </div>
+              {gw > (compact ? Math.min(gridW, 240) : gridW) && (
+                <div className="gx-grid-hscroll" ref={hscrollRef}
+                  onScroll={(e) => { const l = e.currentTarget.scrollLeft; if (gridHeadRef.current) gridHeadRef.current.scrollLeft = l; if (gridBodyRef.current) gridBodyRef.current.scrollLeft = l; }}>
+                  <div style={{ width: gw, height: 1 }} />
+                </div>
+              )}
               </div>
               <div className="gx-splitter" role="separator" aria-orientation="vertical" aria-label={m.resizeGrid} tabIndex={0}
                 aria-valuenow={gridW} aria-valuemin={GRID_MIN} aria-valuemax={900}
@@ -1038,7 +1385,7 @@ function GanttView(props: CoreProps & {
               }}
               onKeyDown={(e) => { if (editKeys(e)) e.preventDefault(); }}
               onPointerLeave={() => { if (!drag.active) pan.current = null; }}>
-              <div className="gx-canvas" ref={canvasRef} style={{ width: chartWidth, height: H }}>
+              <div className="gx-canvas" ref={canvasRef} style={{ width: chartWidth, height: H + sizes.row }}>
                 <div className="gx-window" style={{ top: win.y, height: win.h }}>
                   <BackgroundLayer scale={scale} minor={level.minor} from={dayFrom} to={dayTo} model={model} shade={props.highlightNonWorking !== false} />
                   {markers.map((m) => <div key={m.label + m.day} className={`gx-marker${m.today ? ' gx-today' : ''}`} style={{ left: xOf(scale, m.day) }}><span>{m.label}</span></div>)}
@@ -1062,12 +1409,24 @@ function GanttView(props: CoreProps & {
             </div>
           </div>
         </div>
-        {detailsPanel && <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n}
-          whyNotEdit={whyNotEdit} edit={editTask} compare={compare ? { base: props.compareWith!, placement: compare.base } : undefined} analysis={analysis}
-          whyNotLinkEdit={whyNotLinkEdit} editLink={editLink} />}
+        {detailsPanel && (!compact || selection.length > 0) && (() => {
+          const panel = <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n}
+            whyNotEdit={whyNotEdit} edit={editTask} compare={compare ? { base: props.compareWith!, placement: compare.base } : undefined} analysis={analysis}
+            whyNotLinkEdit={whyNotLinkEdit} editLink={editLink} editMany={editMany} />;
+          // On a small screen (F5) the panel is a sheet over the chart, closed by clearing the selection.
+          return compact ? <div className="gx-sheet"><button className="gx-btn gx-small gx-sheet-close" aria-label={m.closePanel} onClick={() => select([])}>×</button>{panel}</div> : panel;
+        })()}
       </div>
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
+      {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}
+      {pop?.kind === 'columns' && <Popover x={pop.x} y={pop.y} label={m.columns} onClose={() => setPop(null)}>
+        <ColumnsPanel all={allCols} shown={cols} frozen={frozen} onChange={(n, fr) => setColumns(n, fr)} />
+      </Popover>}
+      {pop?.kind === 'filter' && pop.col?.field && <Popover x={pop.x} y={pop.y} label={`${m.filterValues}: ${pop.col.label}`} onClose={() => setPop(null)}>
+        <FilterValues label={pop.col.label} values={filterValuesOf(pop.col.field)} selected={vs.filter?.fields?.[pop.col.field] ?? []}
+          onChange={(v) => { const f = pop.col!.field!; setVs({ ...vs, filter: { ...vs.filter, fields: { ...vs.filter?.fields, [f]: v } } }); }} />
+      </Popover>}
       <div className="gx-sr" aria-live="polite">{announce}</div>
     </div>
     </I18nContext.Provider>
@@ -1075,52 +1434,6 @@ function GanttView(props: CoreProps & {
 }
 
 // ---------- memoised layers ----------
-
-const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block: Block; ctx: Ctx; api: Api; focusRow: number }) {
-  const { model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing } = ctx;
-  const { t: m, num } = useI18n();
-  return <>{block.rows.map((r, k) => {
-    const i = block.start + k;
-    const t = model.tasks.get(r.taskId)!;
-    const p = model.placement.byId.get(r.taskId)!;
-    const selected = selKeys.has(`row:${r.taskId}`) || (!r.lane && selKeys.has(`bar:${r.taskId}`));
-    const kind = t.kind ? kinds?.rows?.[t.kind] : undefined;
-    return (
-      <div key={r.taskId} data-row={i} role="row" aria-level={r.depth + 1} aria-rowindex={i + 2}
-        aria-expanded={r.hasChildren && !r.lane ? r.expanded : undefined} aria-selected={selected}
-        tabIndex={i === focusRow || (focusRow < 0 && i === 0) ? 0 : -1}
-        className={`gx-row${selected ? ' gx-sel' : ''}${linkMarked.has(r.taskId) ? ' gx-marked' : ''}${i === focusRow ? ' gx-focus' : ''}${r.lane ? ' gx-lane' : ''}${compare?.diff.has(r.taskId) ? ` gx-diff-${compare.diff.get(r.taskId)}` : ''}`}
-        style={{ top: r.top, height: r.height }}
-        onFocus={() => api.focus(i, -1)}
-        onContextMenu={(e) => { e.preventDefault(); api.menu(e.clientX, e.clientY, { type: 'row', taskId: r.taskId }); }}
-        onClick={(e) => { api.focus(i, -1); api.select({ type: 'row', taskId: r.taskId }, e.ctrlKey || e.metaKey); }}>
-        <span className="gx-col-wbs" role="gridcell">{r.wbs}</span>
-        <span className="gx-col-name" role="gridcell" style={{ paddingLeft: 6 + r.depth * 16 }}>
-          {r.hasChildren ? (
-            <button className="gx-twisty" tabIndex={-1} aria-label={r.lane ? m.openLane : r.expanded ? m.collapse : m.expand}
-              onClick={(e) => { e.stopPropagation(); r.lane ? api.toggleLane(r.taskId) : api.toggle(r.taskId); }}>
-              {r.lane ? '≡' : r.expanded ? '▾' : '▸'}
-            </button>
-          ) : <span className="gx-twisty-sp" />}
-          {kind?.icon ? <span className="gx-kind-icon" aria-hidden>{kind.icon}</span> : null}
-          {editing === r.taskId
-            ? <input className="gx-inline-edit" defaultValue={t.name} aria-label={m.colName} autoFocus
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') api.finishEdit(r.taskId, e.currentTarget.value); if (e.key === 'Escape') api.finishEdit(r.taskId, null); }}
-                onBlur={(e) => api.finishEdit(r.taskId, e.currentTarget.value === t.name ? null : e.currentTarget.value)} />
-            : <span className="gx-name-text" title={t.name} onDoubleClick={(e) => { e.stopPropagation(); api.startEdit(r.taskId); }}>{t.name}</span>}
-          {compare?.diff.has(r.taskId) && <span className={`gx-badge gx-diff-badge-${compare.diff.get(r.taskId)}`}>{compare.diff.get(r.taskId) === 'added' ? m.diffAdded : m.diffChanged}</span>}
-          {loadState.get(r.taskId) === 'loading' && <span className="gx-badge" role="status">{m.loadingChildren}</span>}
-          {loadState.has(r.taskId) && loadState.get(r.taskId) !== 'loading' && <span className="gx-badge gx-badge-error" title={m.loadFailed(loadState.get(r.taskId)!)} role="status">⚠<span className="gx-sr">{m.loadFailed(loadState.get(r.taskId)!)}</span></span>}
-          {r.lane && <span className="gx-badge" title={m.laneBarsHint}>{m.laneBars(num(r.bars.length))}</span>}
-          {laneOpen.has(r.taskId) && <button className="gx-twisty gx-relane" tabIndex={-1} aria-label={m.closeLane} onClick={(e) => { e.stopPropagation(); api.toggleLane(r.taskId); }}>⇤</button>}
-        </span>
-        <span className="gx-col-date" role="gridcell">{p.scheduled ? fmtDate(p.start!, locale) : <em className="gx-muted">{m.unscheduled}</em>}</span>
-        <span className="gx-col-dur" role="gridcell">{p.scheduled ? num(p.duration ?? 0) : ''}</span>
-      </div>
-    );
-  })}</>;
-});
 
 const RowBgBlock = memo(function RowBgBlock({ block, selKeys }: { block: Block; selKeys: ReadonlySet<string> }) {
   return <>{block.rows.map((r) => {
@@ -1144,10 +1457,11 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     const isSummary = t.type === 'summary' || (!r.lane && (model.children.get(t.id)?.length ?? 0) > 0);
     const row = block.start + k;
     const focused = !!focus && focus.row === row && (r.lane ? bi === focus.bar : focus.bar < 0);
-    const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}${critical?.has(t.id) ? ' gx-critical' : ''}`;
-    const onClick = (e: React.MouseEvent) => { e.stopPropagation(); api.focus(row, r.lane ? bi : -1); api.select(r.lane ? { type: 'bar', taskId: t.id, bar: 'main' } : { type: 'row', taskId: t.id }, e.ctrlKey || e.metaKey); };
-    // While a button is held a drag owns the tooltip.
-    const tipOn = (e: React.PointerEvent) => e.buttons ? undefined : api.tip(e.clientX, e.clientY, taskTip(t, model, i18n));
+    const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}${critical?.has(t.id) ? ' gx-critical' : ''}${ctx.matches && !ctx.matches.has(t.id) && !isGroupId(t.id) ? ' gx-context' : ''}`;
+    const onClick = (e: React.MouseEvent) => { e.stopPropagation(); api.focus(row, r.lane ? bi : -1); api.select(r.lane ? { type: 'bar', taskId: t.id, bar: 'main' } : { type: 'row', taskId: t.id }, e.ctrlKey || e.metaKey || e.shiftKey); };
+    // While a button is held a drag owns the tooltip. A host template may wrap the default content (G7).
+    const Tip = ctx.tooltipTemplate;
+    const tipOn = (e: React.PointerEvent) => e.buttons ? undefined : api.tip(e.clientX, e.clientY, Tip ? <Tip task={t} placed={p} Default={taskTip(t, model, i18n)} /> : taskTip(t, model, i18n));
     const tipOff = (e: React.PointerEvent) => e.buttons ? undefined : api.tip(0, 0, null);
     if (t.type === 'milestone') {
       const s = pos.h;
@@ -1164,7 +1478,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     return [ghost,
       <div key={t.id} data-task={t.id} className={`${cls}${compare?.diff.has(t.id) ? ' gx-diff' : ''}`} style={{ left: x, top: pos.y, width: w, height: pos.h }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}>
         {!isSummary && <div className="gx-progress" style={{ width: `${Math.round(p.progress * 100)}%` }} />}
-        <span className={`gx-bar-label${w < 60 ? ' gx-outside' : ''}`}>{t.name}</span>
+        {ctx.barTemplate && !isGroupId(t.id) ? <ctx.barTemplate task={t} placed={p} /> : <span className={`gx-bar-label${w < 60 ? ' gx-outside' : ''}`}>{t.name}</span>}
         {!isSummary && <>
           <span className="gx-h gx-h-start" data-drag="start" aria-hidden />
           <span className="gx-h gx-h-end" data-drag="end" aria-hidden />
@@ -1264,7 +1578,7 @@ function todayIn(timeZone: string): string {
   catch { return new Date().toISOString().slice(0, 10); }
 }
 const dayOfIso = (iso: string) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86_400_000);
-export const fmtDate = (d: DayNum, locale?: string) => formatDay(d, locale, { day: 'numeric', month: 'short', year: '2-digit' });
+export { fmtDate };
 
 function labelOf(t: SelectionTarget, mdl: Model, m: GanttMessages) {
   if (t.type === 'link') { const l = mdl.doc.links.find((x) => x.id === t.linkId); return l ? m.connectorName(mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target) : m.typeConnector; }

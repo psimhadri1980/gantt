@@ -162,6 +162,61 @@ export interface GanttMessages {
   deleteTask: string;
   deleteDependency: string;
   newTask: string;
+  // grid and views (Phase 5 step 2)
+  colEnd: string;
+  colProgress: string;
+  colOwner: string;
+  colKind: string;
+  colAdd: string;
+  addBelow: (name: string) => string;
+  addPlaceholder: string;
+  addChild: string;
+  cut: string;
+  copy: string;
+  paste: string;
+  duplicate: string;
+  indent: string;
+  outdent: string;
+  copied: (n: string) => string;
+  pasted: (n: string) => string;
+  nothingToPaste: string;
+  reorderRow: string;
+  reorderNeedsTree: string;
+  moved: (name: string) => string;
+  sortAsc: string;
+  sortDesc: string;
+  sortClear: string;
+  sortedBy: (col: string, dir: 'asc' | 'desc') => string;
+  groupByCol: string;
+  groupedBy: (col: string) => string;
+  groupLanes: string;
+  ungroup: string;
+  filterLabel: string;
+  filterValues: string;
+  filterClear: string;
+  filtered: (shown: string, total: string) => string;
+  hideColumn: string;
+  columns: string;
+  columnMenu: (col: string) => string;
+  moveLeft: string;
+  moveRight: string;
+  freezeTo: string;
+  resizeColumn: (col: string) => string;
+  find: string;
+  findPlaceholder: string;
+  findCount: (i: string, n: string) => string;
+  findNone: string;
+  views: string;
+  viewDefault: string;
+  saveViewAs: string;
+  viewName: string;
+  deleteView: string;
+  compact: string;
+  closePanel: string;
+  setForAll: (n: string) => string;
+  apply: string;
+  emptyValue: string;
+  selectedBars: (n: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -313,6 +368,60 @@ export const defaultMessages: GanttMessages = {
   deleteTask: 'Delete task',
   deleteDependency: 'Delete dependency',
   newTask: 'New task',
+  colEnd: 'Finish',
+  colProgress: 'Done',
+  colOwner: 'Owner',
+  colKind: 'Kind',
+  colAdd: 'Add',
+  addBelow: (n) => `Add a task below ${n}`,
+  addPlaceholder: 'Add a task…',
+  addChild: 'Add sub-task',
+  cut: 'Cut',
+  copy: 'Copy',
+  paste: 'Paste',
+  duplicate: 'Duplicate',
+  indent: 'Indent',
+  outdent: 'Outdent',
+  copied: (n) => `${n} copied`,
+  pasted: (n) => `${n} pasted`,
+  nothingToPaste: 'Nothing to paste',
+  reorderRow: 'Drag to move',
+  reorderNeedsTree: 'Rows can be moved only in tree order: clear sorting and grouping first',
+  moved: (n) => `${n} moved`,
+  sortAsc: 'Sort ascending',
+  sortDesc: 'Sort descending',
+  sortClear: 'Clear sorting',
+  sortedBy: (c, d) => `Sorted by ${c}, ${d === 'asc' ? 'ascending' : 'descending'}`,
+  groupByCol: 'Group by this column',
+  groupedBy: (c) => `Grouped by ${c}`,
+  groupLanes: 'Show groups as lanes',
+  ungroup: 'Remove grouping',
+  filterLabel: 'Filter tasks',
+  filterValues: 'Show only',
+  filterClear: 'Clear filter',
+  filtered: (a, b) => `${a} of ${b} tasks`,
+  hideColumn: 'Hide column',
+  columns: 'Columns',
+  columnMenu: (c) => `${c}: column options`,
+  moveLeft: 'Move left',
+  moveRight: 'Move right',
+  freezeTo: 'Freeze columns up to here',
+  resizeColumn: (c) => `Resize ${c}`,
+  find: 'Find',
+  findPlaceholder: 'Find by name, id or WBS',
+  findCount: (i, n) => `${i} of ${n}`,
+  findNone: 'No match',
+  views: 'View',
+  viewDefault: 'Default view',
+  saveViewAs: 'Save view as…',
+  viewName: 'View name',
+  deleteView: 'Delete this view',
+  compact: 'Compact',
+  closePanel: 'Close',
+  setForAll: (n) => `Set for all ${n}`,
+  apply: 'Apply',
+  emptyValue: '(empty)',
+  selectedBars: (n) => `${n} selected`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 

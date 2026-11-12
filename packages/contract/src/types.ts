@@ -40,6 +40,8 @@ export interface Task {
   parent: string | null;
   kind?: string;
   lane?: boolean;
+  /** Position among siblings, ascending (D2). Tasks without it keep their place in the array. */
+  order?: number;
   /** The task has children that are loaded on demand (H2); omit once they are present. */
   hasChildren?: boolean;
   start?: IsoDate;

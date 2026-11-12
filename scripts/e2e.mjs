@@ -40,7 +40,7 @@ const focusedText = (page) => page.evaluate(() => document.activeElement?.textCo
 
 await test('small sample can be explored by keyboard alone, including a connector and its details', async (page) => {
   // Tab from the page start until the tree grid has focus.
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 45; i++) { // toolbar, view tools and column headers come first
     await page.keyboard.press('Tab');
     if (await page.evaluate(() => document.activeElement?.getAttribute('role') === 'row')) break;
   }
@@ -48,7 +48,7 @@ await test('small sample can be explored by keyboard alone, including a connecto
   await page.keyboard.press('ArrowDown'); // 1.1 Requirements
   await page.keyboard.press(' ');
   expectEq(await detailsTitle(page), 'Requirements', 'Space selects the focused row');
-  expectEq(await page.locator('.gx-sr').textContent(), 'Requirements selected', 'selection is announced');
+  expectEq(await page.locator('.gx-sr[aria-live]').textContent(), 'Requirements selected', 'selection is announced');
   await page.keyboard.press('F6');
   if (!(await page.evaluate(() => !!document.activeElement?.closest('.gx-details')))) throw new Error('F6 does not move focus into the details panel');
   // Tab through the panel to the connector button of Requirements → Sign-off.
@@ -149,8 +149,10 @@ await test('the time scale labels follow every zoom level, including periods tha
 await test('children load on demand when a row is expanded (H2)', async (page) => {
   await page.selectOption('select >> nth=0', 'lazy');
   const first = page.locator('[role="row"][aria-rowindex="2"]');
-  await first.waitFor();
-  expectEq(await first.getAttribute('aria-expanded'), 'false', 'an unloaded summary starts collapsed');
+  // Until the new sample is placed, the previous one stays on screen.
+  await page.waitForFunction(() => window.gantt.current?.getData().tasks.some((t) => t.hasChildren));
+  await page.waitForFunction(() => document.querySelector('[role="row"][aria-rowindex="2"]')?.getAttribute('aria-expanded') === 'false', null, { timeout: 5000 })
+    .catch(async () => { throw new Error(`an unloaded summary starts collapsed: aria-expanded=${await first.getAttribute('aria-expanded')}`); });
   const before = await page.locator('.gx-grid-body [role="row"]').count();
   await first.locator('.gx-twisty').click();
   await first.getByText('Loading…').waitFor();
@@ -247,12 +249,23 @@ await test('critical path highlighting and the Schedule button (C2, K1)', async 
 // ---------- Phase 5: editing on the chart ----------
 const taskStart = (page, id) => page.evaluate((i) => window.gantt.current.getData().tasks.find((t) => t.id === i)?.start, id);
 async function barBox(page, id) { const b = await page.locator(`.gx-bar[data-task="${id}"]`).boundingBox(); if (!b) throw new Error(`bar ${id} not visible`); return b; }
+/** Scrolls to a task and waits until its bar stops moving (scrolling and redraws settle), so pointer coordinates are right. */
+async function scrollSettled(page, id) {
+  await page.evaluate((i) => window.gantt.current.scrollToTask(i), id);
+  let last = '';
+  for (let k = 0; k < 40; k++) {
+    await page.waitForTimeout(100);
+    const b = await page.locator(`.gx-bar[data-task="${id}"]`).boundingBox();
+    const key = b ? `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)}` : '';
+    if (key && key === last) return;
+    last = key;
+  }
+}
 const pxPerDay = (page) => page.evaluate(() => { const b = document.querySelector('.gx-bar[data-task="t7"]').getBoundingClientRect(); return b.width / 10; }); // Data model: 8 working days over 10 calendar days
 
 await test('drag a task: successors preview before release, the change applies to all, undo and redo (D1, D17, F8)', async (page) => {
   await page.getByRole('radio', { name: 'Days' }).click();
-  await page.evaluate(() => window.gantt.current.scrollToTask('t7'));
-  await page.waitForTimeout(500);
+  await scrollSettled(page, 't7');
   const px = await pxPerDay(page);
   const b = await barBox(page, 't7');
   const s7 = await taskStart(page, 't7'), s8 = await taskStart(page, 't8');
@@ -278,8 +291,7 @@ await test('drag a task: successors preview before release, the change applies t
 
 await test('Esc cancels a drag, resize changes the duration, progress can be dragged (D17, D6)', async (page) => {
   await page.getByRole('radio', { name: 'Days' }).click();
-  await page.evaluate(() => window.gantt.current.scrollToTask('t7'));
-  await page.waitForTimeout(500);
+  await scrollSettled(page, 't7');
   const px = await pxPerDay(page);
   let b = await barBox(page, 't7');
   const s7 = await taskStart(page, 't7');
@@ -291,19 +303,20 @@ await test('Esc cancels a drag, resize changes the duration, progress can be dra
   b = await barBox(page, 't7');
   await page.mouse.move(b.x + b.width - 2, b.y + b.height / 2); await page.mouse.down();
   await page.mouse.move(b.x + b.width - 2 + px * 2, b.y + b.height / 2, { steps: 5 }); await page.mouse.up();
-  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').duration === 10);
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').duration === 10, null, { timeout: 8000 })
+    .catch(async () => { throw new Error(`resize: duration ${await page.evaluate(() => JSON.stringify(window.gantt.current.getData().tasks.find((t) => t.id === 't7')))}`); });
   await page.locator('.gx-bar[data-task="t7"]').click();
   b = await barBox(page, 't7');
   const hp = await page.locator('.gx-bar[data-task="t7"] .gx-hp').boundingBox();
   await page.mouse.move(hp.x + hp.width / 2, hp.y + hp.height / 2); await page.mouse.down();
   await page.mouse.move(b.x + b.width * 0.5, hp.y + hp.height / 2, { steps: 5 }); await page.mouse.up();
-  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').progress >= 0.4);
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').progress >= 0.4, null, { timeout: 8000 })
+    .catch(async () => { throw new Error(`progress drag: ${await page.evaluate(() => JSON.stringify(window.gantt.current.getData().tasks.find((t) => t.id === 't7')))}`); });
 });
 
 await test('draw a dependency on the chart; a cycle is refused with the reason shown (D6, C9)', async (page) => {
   await page.getByRole('radio', { name: 'Weeks' }).click();
-  await page.evaluate(() => window.gantt.current.scrollToTask('t12'));
-  await page.waitForTimeout(500);
+  await scrollSettled(page, 't12');
   const links0 = await page.evaluate(() => window.gantt.current.getData().links.length);
   const from = page.locator('.gx-bar[data-task="t12"]');
   await from.hover();
@@ -347,8 +360,7 @@ await test('keyboard only: move a task, link it to another, undo (F9, F3)', asyn
 });
 
 await test('context menu on a bar and a connector; connector type and lag in its details (D8)', async (page) => {
-  await page.evaluate(() => window.gantt.current.scrollToTask('t3'));
-  await page.waitForTimeout(400);
+  await scrollSettled(page, 't3');
   const s3 = await taskStart(page, 't3');
   await page.locator('.gx-bar[data-task="t3"]').click({ button: 'right' });
   await page.getByRole('menuitem', { name: /Move one day later/ }).click();
@@ -363,14 +375,161 @@ await test('context menu on a bar and a connector; connector type and lag in its
 });
 
 await test('touch: a long press on a bar opens the menu (F10)', async (page) => {
-  await page.evaluate(() => window.gantt.current.scrollToTask('t3'));
-  await page.waitForTimeout(400);
+  await scrollSettled(page, 't3');
   const b = await barBox(page, 't3');
   await page.evaluate(({ x, y }) => {
     const el = document.elementFromPoint(x, y);
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, button: 0, isPrimary: true }));
   }, { x: b.x + b.width / 2, y: b.y + b.height / 2 });
   await page.getByRole('menu').waitFor({ timeout: 2000 });
+});
+
+// ---------- Phase 5 step 2: grid editing and views ----------
+const rowNames = (page) => page.evaluate(() => [...document.querySelectorAll('.gx-grid-body [role="row"][data-task]')]
+  .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((r) => r.querySelector('.gx-name-text')?.textContent));
+const task = (page, name) => page.evaluate((n) => window.gantt.current.getData().tasks.find((t) => t.name === n), name);
+const dataLen = (page) => page.evaluate(() => { const d = window.gantt.current.getData(); return { tasks: d.tasks.length, links: d.links.length }; });
+const row = (page, name) => page.locator('.gx-grid-body [role="row"]', { has: page.locator('.gx-name-text', { hasText: new RegExp(`^${name}$`) }) });
+
+await test('add a task from the action column and from the placeholder row; undo (D3, D4)', async (page) => {
+  await row(page, 'API layer').hover();
+  await page.getByRole('button', { name: 'Add a task below API layer' }).click();
+  const edit = page.locator('.gx-inline-edit');
+  await edit.waitFor();
+  await edit.fill('Load tests'); await edit.press('Enter');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.some((t) => t.name === 'Load tests'));
+  const t = await task(page, 'Load tests');
+  expectEq(t.parent, 't6', 'the new task is a sibling of API layer');
+  // The grid redraws once the engine has placed the changed roadmap.
+  await page.waitForFunction(() => { const n = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task]')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((r) => r.querySelector('.gx-name-text')?.textContent); return n[n.indexOf('API layer') + 1] === 'Load tests'; }, null, { timeout: 5000 })
+    .catch(async () => { throw new Error(`placed right below API layer: ${(await rowNames(page)).join(', ')}`); });
+  await page.locator('.gx-placeholder-input').click();
+  await page.keyboard.type('Wrap-up'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.some((t) => t.name === 'Wrap-up' && t.parent === null));
+  await page.waitForFunction(() => { const n = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task]')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)); return n.at(-1)?.querySelector('.gx-name-text')?.textContent === 'Wrap-up'; }, null, { timeout: 5000 })
+    .catch(async () => { throw new Error(`quick entry adds at the end: ${(await rowNames(page)).join(', ')}`); });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.waitForFunction(() => !window.gantt.current.getData().tasks.some((t) => t.name === 'Wrap-up'));
+});
+
+await test('reorder rows by dragging, indent and outdent, copy and paste with internal links (D2, D16, D15)', async (page) => {
+  const pilot = await row(page, 'Pilot').boundingBox(); // aim at its top edge: "before Pilot"
+  const training = await row(page, 'Training').locator('.gx-grip').boundingBox();
+  await page.mouse.move(training.x + 10, training.y + training.height / 2); await page.mouse.down();
+  await page.mouse.move(pilot.x + 10, pilot.y + 3, { steps: 6 }); await page.mouse.up();
+  await page.waitForFunction(() => { const d = window.gantt.current.getData(); const o = (n) => d.tasks.find((t) => t.name === n).order; return o('Training') < o('Pilot'); });
+  await page.waitForFunction(() => { const n = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task]')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((r) => r.querySelector('.gx-name-text')?.textContent); return n.indexOf('Training') < n.indexOf('Pilot'); }, null, { timeout: 5000 })
+    .catch(async () => { throw new Error(`Training not above Pilot: ${(await rowNames(page)).join(', ')}`); });
+  // Indent goes under the row above (Rollout); a task linked to the row above would be refused with the reason.
+  await row(page, 'Decommission legacy').click();
+  await page.keyboard.press('Control+]');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.name === 'Decommission legacy').parent === 't15');
+  await page.keyboard.press('Control+[');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.name === 'Decommission legacy').parent === null);
+  // Copy Core platform (4 tasks, 2 links between them) and paste it.
+  const before = await dataLen(page);
+  await row(page, 'Core platform').click();
+  await page.keyboard.press('Control+c');
+  await page.keyboard.press('Control+v');
+  await page.waitForFunction((n) => window.gantt.current.getData().tasks.length === n + 4, before.tasks);
+  const after = await dataLen(page);
+  expectEq(after.links - before.links, 2, 'the links inside the copied subtree are copied');
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction((n) => window.gantt.current.getData().tasks.length === n, before.tasks);
+});
+
+await test('sort by a column header, filter, group and find (D9, D10, D11, D19)', async (page) => {
+  const top = async () => (await page.evaluate(() => [...document.querySelectorAll('.gx-grid-body [role="row"][aria-level="1"]')]
+    .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((r) => r.querySelector('.gx-name-text').textContent)));
+  const nameHead = page.getByRole('columnheader', { name: /Name/ });
+  await nameHead.getByRole('button', { name: 'Name', exact: true }).click();
+  expectEq(await nameHead.getAttribute('aria-sort'), 'ascending', 'aria-sort');
+  expectEq((await top()).join(','), 'Build,Decommission legacy,Planning,Rollout', 'ascending');
+  await nameHead.getByRole('button', { name: 'Name', exact: true }).click();
+  expectEq((await top())[0], 'Rollout', 'descending');
+  await nameHead.getByRole('button', { name: 'Name', exact: true }).click();
+  expectEq(await nameHead.getAttribute('aria-sort'), null, 'third click clears');
+  await page.getByRole('searchbox', { name: 'Filter tasks' }).fill('pilot');
+  await page.waitForFunction(() => document.querySelectorAll('.gx-grid-body [role="row"][data-task]').length === 2);
+  expectEq((await rowNames(page)).join(','), 'Rollout,Pilot', 'a match and its ancestor');
+  await page.getByRole('button', { name: 'Clear filter' }).click();
+  // Group by the Days column from its header menu.
+  await page.getByRole('columnheader', { name: /Days/ }).click({ button: 'right' });
+  await page.getByRole('menuitemradio', { name: 'Group by this column' }).click();
+  await page.locator('.gx-row.gx-group').first().waitFor();
+  if (await page.locator('.gx-grid-body [role="row"][aria-level="1"]:not(.gx-group)').count()) throw new Error('ungrouped top-level rows remain');
+  await page.getByRole('button', { name: 'Remove grouping' }).click();
+  await page.locator('.gx-row.gx-group').first().waitFor({ state: 'detached' });
+  // Find.
+  await page.locator('.gx-chart').focus();
+  await page.keyboard.press('Control+f');
+  await page.getByRole('searchbox', { name: 'Find' }).fill('go-live');
+  await page.getByText('1 of 1').waitFor();
+  await page.waitForFunction(() => window.gantt.current.getSelection().some((s) => s.taskId === 't18'));
+});
+
+await test('columns: show one, resize, reorder; saved views restore them (D18, F12)', async (page) => {
+  await page.getByRole('button', { name: 'Columns' }).click();
+  await page.getByRole('dialog', { name: 'Columns' }).getByLabel('Owner').check();
+  await page.keyboard.press('Escape');
+  await page.getByRole('columnheader', { name: /Owner/ }).waitFor();
+  const h = await page.getByRole('separator', { name: 'Resize WBS' }).boundingBox();
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2); await page.mouse.down();
+  await page.mouse.move(h.x + 40, h.y + h.height / 2, { steps: 4 }); await page.mouse.up();
+  const ws = (await page.getByRole('columnheader', { name: /^WBS/ }).boundingBox()).width;
+  if (ws < 90) throw new Error(`WBS column not resized: ${ws}`);
+  await page.getByRole('combobox', { name: 'View' }).selectOption({ label: 'Save view as…' });
+  await page.getByRole('textbox', { name: 'View name' }).fill('Owners');
+  await page.keyboard.press('Enter');
+  await page.getByRole('combobox', { name: 'View' }).selectOption({ label: 'Default view' });
+  await page.getByRole('columnheader', { name: /Owner/ }).waitFor({ state: 'detached' });
+  await page.getByRole('combobox', { name: 'View' }).selectOption({ label: 'Owners' });
+  await page.getByRole('columnheader', { name: /Owner/ }).waitFor();
+});
+
+await test('multi-select: Shift+click a range, move them together, lasso on the chart (D14)', async (page) => {
+  await row(page, 'Data model').click();
+  await row(page, 'Auth integration').click({ modifiers: ['Shift'] });
+  expectEq(await page.locator('.gx-grid-body [role="row"][aria-selected="true"]').count(), 3, 'three rows selected');
+  const s9 = await taskStart(page, 't9');
+  await page.keyboard.press('Alt+ArrowRight');
+  await page.waitForFunction((v) => window.gantt.current.getData().tasks.find((t) => t.id === 't9').start !== v, s9);
+  // Bulk field change from the details panel, as one operation.
+  await page.getByRole('textbox', { name: 'Owner: Set for all 3' }).fill('zoe');
+  await page.locator('.gx-bulk button', { hasText: 'Apply' }).first().click();
+  await page.waitForFunction(() => ['t7', 't8', 't9'].every((id) => window.gantt.current.getData().tasks.find((t) => t.id === id).owner === 'zoe'));
+  await row(page, 'Data model').click();
+  await page.keyboard.press('Escape');
+  await scrollSettled(page, 't2');
+  const a = await barBox(page, 't2'), b = await barBox(page, 't3');
+  const x0 = Math.min(a.x, b.x) - 12, y0 = a.y - 4, x1 = Math.max(a.x + a.width, b.x + b.width) + 4, y1 = b.y + b.height + 4;
+  await page.keyboard.down('Shift');
+  await page.mouse.move(x0, y0); await page.mouse.down();
+  await page.mouse.move(x1, y1, { steps: 6 }); await page.mouse.up();
+  await page.keyboard.up('Shift');
+  const sel = await page.evaluate(() => window.gantt.current.getSelection().map((s) => s.taskId).sort().join(','));
+  if (!sel.includes('t2') || !sel.includes('t3')) throw new Error(`lasso selected ${sel}`);
+});
+
+await test('compact mode on a small screen: details open as a sheet and close (F5)', async (page) => {
+  await page.setViewportSize({ width: 600, height: 800 });
+  await page.locator('.gx-root.gx-compact').waitFor();
+  if (await page.locator('.gx-grid').count()) throw new Error('the grid is shown in compact mode');
+  await scrollSettled(page, 't3');
+  await page.locator('.gx-bar[data-task="t3"]').click();
+  await page.locator('.gx-sheet .gx-details').waitFor();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.locator('.gx-sheet').waitFor({ state: 'detached' });
+});
+
+await test('host templates for a cell, a bar and a tooltip (G7)', async (page) => {
+  await page.goto('http://127.0.0.1:5192/?templates=1');
+  await page.waitForSelector('.gx-bar');
+  await page.locator('.demo-owner').first().waitFor();
+  await page.locator('.gx-bar .demo-bar-tpl').first().waitFor();
+  await scrollSettled(page, 't3');
+  await page.locator('.gx-bar[data-task="t3"]').hover();
+  await page.locator('.gx-tooltip .demo-tip-tpl').waitFor();
 });
 
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------

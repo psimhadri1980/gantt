@@ -1,6 +1,6 @@
-import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
+import { StrictMode, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Gantt, memoryBackend, type AccessRules, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
+import { Gantt, memoryBackend, type GridColumn, type AccessRules, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
 import { RoadmapService } from '@gantt/service';
 import roles from '../../../packages/mock/src/samples/roles.json';
 import { generate, loadMock, splitForLazyLoading } from '@gantt/mock';
@@ -29,6 +29,17 @@ const german: Partial<GanttMessages> = {
   workingDays: (n) => `${n} Arbeitstage`, saving: 'Wird gespeichert…', saved: 'Gespeichert', notSaved: (r) => `Nicht gespeichert: ${r}`,
   readOnly: 'Das Diagramm ist schreibgeschützt',
 };
+
+// Templates (G7) and a host column (D18), shown with ?templates=1.
+const withTemplates = new URLSearchParams(location.search).has('templates');
+const hostColumns: GridColumn[] = [{
+  id: 'owner', label: 'Owner', width: 90, field: 'owner',
+  cell: ({ task }) => <span className="demo-owner">{task.owner ? `@${task.owner}` : '—'}</span>,
+}];
+const BarTemplate = ({ task, placed }: { task: { name: string }; placed: { progress: number } }) =>
+  <span className="gx-bar-label demo-bar-tpl">{task.name} · {Math.round(placed.progress * 100)}%</span>;
+const TooltipTemplate = ({ task, Default }: { task: { owner?: string }; Default: ReactNode }) =>
+  <>{Default}<div className="demo-tip-tpl">Owner: {task.owner ?? 'nobody'}</div></>;
 
 type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid';
 const rules = roles as Record<string, AccessRules>;
@@ -132,6 +143,7 @@ function App() {
           <Gantt ref={ref} data={result.r.doc} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 110px)"
             markers={[{ date: '2026-12-18', label: 'Code freeze' }]} userId="demo-user"
             readOnly={readOnly} saveState={save} onDataChanged={onDataChanged} loadChildren={result.loadChildren}
+            columns={withTemplates ? hostColumns : undefined} barTemplate={withTemplates ? BarTemplate : undefined} tooltipTemplate={withTemplates ? TooltipTemplate : undefined}
             locale={lang === 'de' ? 'de-DE' : undefined} messages={lang === 'de' ? german : undefined}
             onBeforeOperation={(op) => (lockZoom && op.type === 'zoom.set' ? 'Zoom is locked by the host' : undefined)}
             onOperation={(r, ctx) => push(`✓ ${ctx.source}: ${describe(r.operation)}`)}

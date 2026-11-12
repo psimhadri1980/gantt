@@ -46,6 +46,12 @@ export function buildModel(doc: RoadmapDocument, placement: Placement = place(do
   const tasks = new Map(doc.tasks.map((t) => [t.id, t]));
   const children = new Map<string | null, string[]>();
   for (const t of doc.tasks) (children.get(t.parent) ?? children.set(t.parent, []).get(t.parent)!).push(t.id);
+  // Siblings follow `order` (D2); tasks without it keep their array position (stable sort).
+  if (doc.tasks.some((t) => t.order !== undefined)) {
+    const pos = new Map(doc.tasks.map((t, i) => [t.id, i]));
+    const key = (id: string) => tasks.get(id)!.order ?? pos.get(id)!;
+    for (const kids of children.values()) kids.sort((a, b) => key(a) - key(b) || pos.get(a)! - pos.get(b)!);
+  }
   const linksByTask = new Map<string, Link[]>();
   for (const l of doc.links) for (const id of [l.source, l.target]) (linksByTask.get(id) ?? linksByTask.set(id, []).get(id)!).push(l);
   // WBS codes (D13) from tree order.

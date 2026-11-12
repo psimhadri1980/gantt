@@ -7,7 +7,7 @@ import type { SelectionTarget } from './selection.ts';
  * operations change only what is shown. Permissions (L5), Proposals and undo all hook into this pipeline.
  */
 export type DataOperation =
-  | { type: 'task.create'; task: Task }
+  | { type: 'task.create'; task: Task; /** Array position to insert at (undo of a delete restores it). */ index?: number }
   | { type: 'task.update'; id: string; fields: Partial<Omit<Task, 'id'>> }
   | { type: 'task.delete'; id: string }
   | { type: 'link.create'; link: Link }
@@ -69,7 +69,9 @@ export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { d
   switch (op.type) {
     case 'task.create':
       if (tasks.some((t) => t.id === op.task.id)) return { error: `task "${op.task.id}" already exists` };
-      tasks = [...tasks, op.task]; inverse = [{ type: 'task.delete', id: op.task.id }]; break;
+      if (op.index !== undefined && op.index >= 0 && op.index <= tasks.length) { tasks = tasks.slice(); tasks.splice(op.index, 0, op.task); }
+      else tasks = [...tasks, op.task];
+      inverse = [{ type: 'task.delete', id: op.task.id }]; break;
     case 'task.update': {
       const i = tasks.findIndex((t) => t.id === op.id);
       if (i < 0) return { error: `unknown task "${op.id}"` };
@@ -84,11 +86,12 @@ export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { d
       // Deleting a task deletes its subtree and every link that touches it.
       const gone = new Set([op.id]);
       for (let grew = true; grew;) { grew = false; for (const x of tasks) if (x.parent && gone.has(x.parent) && !gone.has(x.id)) { gone.add(x.id); grew = true; } }
-      const removedTasks = tasks.filter((x) => gone.has(x.id));
+      // Remembered with their positions, so undo puts them back where they were.
+      const removedTasks = tasks.flatMap((x, i) => gone.has(x.id) ? [{ task: x, index: i }] : []);
       const removedLinks = links.filter((l) => gone.has(l.source) || gone.has(l.target));
       tasks = tasks.filter((x) => !gone.has(x.id));
       links = links.filter((l) => !gone.has(l.source) && !gone.has(l.target));
-      inverse = [...removedTasks.map((task): DataOperation => ({ type: 'task.create', task })), ...removedLinks.map((link): DataOperation => ({ type: 'link.create', link }))];
+      inverse = [...removedTasks.map(({ task, index }): DataOperation => ({ type: 'task.create', task, index })), ...removedLinks.map((link): DataOperation => ({ type: 'link.create', link }))];
       break;
     }
     case 'link.create':

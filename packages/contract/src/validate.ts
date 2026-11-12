@@ -18,7 +18,7 @@ const KNOWN: Record<string, string[]> = {
   root: ['contract', 'roadmap', 'calendars', 'tasks', 'links', 'resources', 'proposals', 'access'],
   roadmap: ['id', 'name', 'version', 'timeZone', 'start', 'defaultCalendar', 'statusDate'],
   calendar: ['id', 'name', 'workingDays', 'hoursPerDay', 'holidays'],
-  task: ['id', 'name', 'type', 'parent', 'kind', 'lane', 'start', 'duration', 'durationUnit', 'end', 'progress',
+  task: ['id', 'name', 'type', 'parent', 'kind', 'lane', 'order', 'start', 'duration', 'durationUnit', 'end', 'progress',
     'mode', 'owner', 'resources', 'constraint', 'deadline', 'hasChildren'],
   link: ['id', 'source', 'target', 'type', 'kind', 'lag', 'lagUnit'],
   resource: ['id', 'name', 'capacityFte', 'calendar'],
@@ -149,6 +149,7 @@ export function validate(input: unknown): ValidationResult {
       if (t.type === 'task' && t.start !== undefined && t.duration === undefined && t.end === undefined) err(`${p}.duration`, 'is required when start is given (or give end)');
     }
     num(t, 'progress', p, 0, 1);
+    num(t, 'order', p);
     date(t, 'deadline', p);
     if (t.constraint !== undefined) {
       if (!isObj(t.constraint)) err(`${p}.constraint`, 'must be an object');

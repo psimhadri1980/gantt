@@ -41,18 +41,20 @@ interface Props {
   /** Editing a connector's type and lag; null when allowed, else the reason. */
   whyNotLinkEdit?: () => string | null;
   editLink?: (id: string, fields: Partial<Link>) => unknown;
+  /** Bulk field change for a multi-selection (D14), as one operation. */
+  editMany?: (ids: string[], fields: Partial<Task>) => unknown;
 }
 
 const fmt = (d: DayNum | undefined, locale?: string) =>
   d === undefined ? '—' : formatDay(d, locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const readOnly = () => false; // Phase 1: the panel is read-only.
 
-export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis, whyNotLinkEdit, editLink }: Props) {
+export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis, whyNotLinkEdit, editLink, editMany }: Props) {
   const { t: m } = i18n;
   const primary = selection[selection.length - 1];
   let body: ReactNode;
   if (!primary) body = <RoadmapSummary model={model} analysis={analysis} select={select} />;
-  else if (selection.length > 1) body = <Multi model={model} selection={selection} />;
+  else if (selection.length > 1) body = <Multi model={model} selection={selection} whyNotEdit={whyNotEdit} editMany={editMany} />;
   else if (primary.type === 'link') {
     const l = model.doc.links.find((x) => x.id === primary.linkId);
     if (!l) body = <p className="gx-muted">{m.noLongerExists}</p>;
@@ -229,8 +231,14 @@ function LinkDetails({ link: l, model, select, kinds, analysis, why, edit }: { l
   );
 }
 
-function Multi({ model, selection }: { model: Model; selection: SelectionTarget[] }) {
+function Multi({ model, selection, whyNotEdit, editMany }: { model: Model; selection: SelectionTarget[]; whyNotEdit?: Props['whyNotEdit']; editMany?: Props['editMany'] }) {
   const { t: m, locale, num } = useI18n();
+  // Leaf tasks only: summaries derive their progress, and group rows are not tasks.
+  const ids = selection.flatMap((t) => (t.type !== 'link' && model.doc.tasks.some((x) => x.id === t.taskId) ? [t.taskId] : []));
+  const leaves = ids.filter((id) => !(model.children.get(id)?.length));
+  const [owner, setOwner] = useState('');
+  const [progress, setProgress] = useState('');
+  const why = (ids: string[], f: string) => (whyNotEdit ? ids.map((id) => whyNotEdit(id, f)).find((w) => w) ?? null : 'read-only');
   let s = Infinity, e = -Infinity;
   for (const t of selection) if (t.type !== 'link') { const p = model.placement.byId.get(t.taskId); if (p?.scheduled) { s = Math.min(s, p.start!); e = Math.max(e, p.end!); } }
   const nLinks = selection.filter((t) => t.type === 'link').length;
@@ -239,7 +247,20 @@ function Multi({ model, selection }: { model: Model; selection: SelectionTarget[
       <Field label={m.tasks}>{num(selection.length - nLinks)}</Field>
       <Field label={m.connectors}>{num(nLinks)}</Field>
       {s !== Infinity && <Field label={m.span}>{fmt(s, locale)} – {fmt(e, locale)}</Field>}
-    </dl></section></div>;
+    </dl></section>
+    {editMany && ids.length > 1 && <section className="gx-bulk"><h4>{m.setForAll(num(ids.length))}</h4><dl>
+      <Field label={m.colOwner}>
+        <input className="gx-input" aria-label={`${m.colOwner}: ${m.setForAll(num(ids.length))}`} value={owner} onChange={(e) => setOwner(e.target.value)} />
+        <button className="gx-btn gx-small" aria-disabled={!owner.trim() || !!why(ids, 'owner') || undefined} title={why(ids, 'owner') ?? undefined}
+          onClick={() => { if (owner.trim() && !why(ids, 'owner')) editMany(ids, { owner: owner.trim() }); }}>{m.apply}</button>
+      </Field>
+      {leaves.length > 0 && <Field label={m.progress}>
+        <input className="gx-input" type="number" min={0} max={100} step={5} aria-label={`${m.progress}: ${m.setForAll(num(leaves.length))}`} value={progress} onChange={(e) => setProgress(e.target.value)} />
+        <button className="gx-btn gx-small" aria-disabled={progress === '' || !!why(leaves, 'progress') || undefined} title={why(leaves, 'progress') ?? undefined}
+          onClick={() => { const v = Number(progress); if (progress !== '' && v >= 0 && v <= 100 && !why(leaves, 'progress')) editMany(leaves, { progress: v / 100 }); }}>{m.apply}</button>
+      </Field>}
+    </dl></section>}
+  </div>;
 }
 
 function RoadmapSummary({ model, analysis, select }: { model: Model; analysis?: Props['analysis']; select: Props['select'] }) {
