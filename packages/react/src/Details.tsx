@@ -188,10 +188,11 @@ function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare,
           {preds.map((l) => <li key={l.id}><span className="gx-muted">{m.after}</span> <TaskRef id={l.source} model={model} select={select} /> {linkBtn(l)}</li>)}
           {succs.map((l) => <li key={l.id}><span className="gx-muted">{m.before}</span> <TaskRef id={l.target} model={model} select={select} /> {linkBtn(l)}</li>)}
         </ul></section>}
-      {(t.owner || t.resources?.length) && <section><h4>{m.people}</h4><dl>
+      {(t.owner || t.resources?.length || (model.doc.resources?.length && t.type === 'task')) && <section><h4>{m.people}</h4><dl>
         {t.owner && <Field label={m.owner}>{t.owner}</Field>}
-        {t.resources?.map((r) => <Field key={r.id} label={model.doc.resources?.find((x) => x.id === r.id)?.name ?? r.id}>{pct(r.allocation)}</Field>)}
-      </dl></section>}
+      </dl>
+        <Assignments task={t} model={model} why={whyNotEdit ? whyNotEdit(t.id, 'resources') : 'read-only'} edit={edit} pct={pct} />
+      </section>}
       {extra.length > 0 && <section><h4>{m.otherFields}</h4><dl>{extra.map(([k, v]) => <Field key={k} label={k}>{String(typeof v === 'object' ? JSON.stringify(v) : v)}</Field>)}</dl></section>}
     </div>
   );
@@ -298,4 +299,41 @@ function LagInput({ value, label, onCommit }: { value: number; label: string; on
   useEffect(() => setDraft(String(value)), [value]);
   const commit = () => { const v = Math.round(Number(draft)); if (Number.isFinite(v) && v !== value) onCommit(v); };
   return <input className="gx-input" type="number" step={1} aria-label={label} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); }} />;
+}
+
+/** Who works on a task and how much of their time (E1): add, change the share, remove. */
+function Assignments({ task: t, model, why, edit, pct }: { task: Task; model: Model; why: string | null; edit?: Props['edit']; pct: (v: number) => string }) {
+  const { t: m } = useI18n();
+  const all = model.doc.resources ?? [];
+  const list = t.resources ?? [];
+  const name = (id: string) => all.find((r) => r.id === id)?.name ?? id;
+  const set = (next: Task['resources']) => edit?.(t.id, { resources: next && next.length ? next : null as unknown as undefined });
+  const can = why === null && !!edit;
+  const free = all.filter((r) => !list.some((a) => a.id === r.id));
+  return (
+    <div className="gx-assign">
+      {list.length === 0 && <p className="gx-muted">{m.noAssignments}</p>}
+      <ul className="gx-list">
+        {list.map((a) => (
+          <li key={a.id} className="gx-assign-row">
+            <span>{name(a.id)}</span>
+            {can ? <>
+              <input className="gx-input gx-pct" type="number" min={5} max={100} step={5} aria-label={m.allocationOf(name(a.id))} defaultValue={Math.round(a.allocation * 100)}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                onBlur={(e) => { const v = Number(e.currentTarget.value); if (v > 0 && v <= 100 && v / 100 !== a.allocation) set(list.map((x) => (x.id === a.id ? { ...x, allocation: v / 100 } : x))); }} />
+              <span className="gx-muted">%</span>
+              <button className="gx-btn gx-small" aria-label={m.unassign(name(a.id))} onClick={() => set(list.filter((x) => x.id !== a.id))}>×</button>
+            </> : <span>{pct(a.allocation)}</span>}
+          </li>
+        ))}
+      </ul>
+      {can && free.length > 0 && (
+        <select className="gx-select" aria-label={m.assign} value="" onChange={(e) => { if (e.target.value) set([...list, { id: e.target.value, allocation: 1 }]); }}>
+          <option value="">{m.assign}…</option>
+          {free.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      )}
+      {!can && why && why !== 'read-only' && <p className="gx-muted" title={why}>{why}</p>}
+    </div>
+  );
 }

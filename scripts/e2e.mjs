@@ -649,6 +649,61 @@ await test('progress line on a chosen date marks tasks ahead and behind; rollups
   expectEq(await page.locator('.gx-bar[data-task="t6"] .gx-rollup').count(), 3, 'Core platform shows its three tasks');
 });
 
+// ---------- Phase 9: resources ----------
+async function staffedSample(page) { await page.goto('http://127.0.0.1:5192/?sample=resources'); await page.waitForSelector('.gx-bar[data-task="t7"]'); }
+const openLoad = (page) => page.getByRole('button', { name: 'Resources', exact: true }).click();
+
+await test('without resource data the load shows total demand per period, and per owner (E7)', async (page) => {
+  await openLoad(page);
+  await page.getByText('No resource data: each task counts as one person full time.').waitFor();
+  const labels = await page.locator('.gx-load-label').allTextContents();
+  if (labels[0] !== 'Total demand' || labels.length < 2) throw new Error(`rows: ${labels.join(' | ')}`);
+  if (!(await page.locator('.gx-load-cell[data-row="total"]').count())) throw new Error('no demand bars');
+  if (await page.locator('.gx-load-cell[data-over]').count()) throw new Error('over-allocation shown without any capacity');
+});
+
+await test('with assignments the load is per resource, over-allocation highlighted against capacity (E3, E4, E5)', async (page) => {
+  await staffedSample(page);
+  await openLoad(page);
+  expectEq((await page.locator('.gx-load-label').allTextContents()).join(' | '), '⠿Pat · 1 FTE | ⠿Sam · 1 FTE | ⠿Kim (part-time) · 0.6 FTE | Unassigned', 'rows');
+  await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().waitFor();
+  const tip = await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().getAttribute('title');
+  if (!/over-allocated on \d+ days/.test(tip)) throw new Error(tip);
+});
+
+await test('assign in the details panel and by dragging a person onto a bar (E1, E2)', async (page) => {
+  await staffedSample(page);
+  await row(page, 'Requirements').click();
+  await page.locator('.gx-details').getByRole('combobox', { name: 'Assign' }).selectOption({ label: 'Pat' });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't2').resources.some((r) => r.id === 'pat'));
+  await page.locator('.gx-details').getByRole('spinbutton', { name: 'Share of Pat’s time' }).fill('50');
+  await page.locator('.gx-details').getByRole('spinbutton', { name: 'Share of Pat’s time' }).press('Enter');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't2').resources.find((r) => r.id === 'pat').allocation === 0.5);
+  await openLoad(page);
+  await scrollSettled(page, 't3');
+  await page.locator('.gx-load-label', { hasText: 'Kim' }).dragTo(page.locator('.gx-bar[data-task="t3"]'));
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't3').resources.some((r) => r.id === 'kim'));
+});
+
+await test('levelling removes over-allocation in one undoable change (E6)', async (page) => {
+  await staffedSample(page);
+  await openLoad(page);
+  await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().waitFor();
+  await page.getByRole('button', { name: 'Level resources' }).click();
+  await page.getByText(/tasks moved so nobody is over-allocated/).first().waitFor();
+  await page.waitForFunction(() => !document.querySelector('.gx-load-cell[data-over]'));
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().waitFor();
+});
+
+await test('a backlog item dragged onto the chart becomes a task there (D5)', async (page) => {
+  await staffedSample(page);
+  await scrollSettled(page, 't16');
+  await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).dragTo(page.locator('.gx-chart'), { targetPosition: { x: 300, y: await page.evaluate(() => { const c = document.querySelector('.gx-chart').getBoundingClientRect(); const r = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task="t15"]')][0].getBoundingClientRect(); return r.top - c.top + r.height / 2; }) } });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.some((t) => t.name === 'Load testing' && t.parent === 't15' && t.duration === 3));
+  await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).waitFor({ state: 'detached' });
+});
+
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------
 async function proposals(page) {
   await page.goto('http://127.0.0.1:5192/?sample=proposals');

@@ -7,7 +7,7 @@ import {
   copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
   type GanttViewState, type SavedView, type TreeClipboard,
 } from '@gantt/state';
-import { fixesFor, fromDay, place, progressLine, schedule, sCurve, toDay, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
+import { fixesFor, fromDay, levelResources, place, progressLine, resourceLoad, schedule, sCurve, toDay, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
 import { checkChange, type AccessEvaluator } from '@gantt/access';
 import { placeOffThread, scheduleOffThread } from './engineClient.ts';
 import { DragController, type DragKind } from './drag.ts';
@@ -19,6 +19,7 @@ import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBloc
 import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
 import type { PlacedTask } from '@gantt/engine';
 import { ProgressLineLayer, SCurveChart } from './tracking.tsx';
+import { Backlog, LoadPanel, type BacklogItem } from './resources.tsx';
 import './gantt.css';
 
 export interface GanttProps {
@@ -95,6 +96,9 @@ export interface GanttProps {
   tooltipTemplate?: ComponentType<{ task: Task; placed: PlacedTask; Default: ReactNode }>;
   /** Compact mode for small screens (F5): `'auto'` (default) switches it on below 720 px. */
   compact?: boolean | 'auto';
+  /** Unplanned work to drag onto the chart (D5); `onBacklogUsed` tells the host which item became which task. */
+  backlog?: BacklogItem[];
+  onBacklogUsed?: (item: BacklogItem, taskId: string) => void;
   /** Scale boundaries (G3): fixed dates; each side left out follows the data with some margin (flexible). */
   scaleRange?: { start?: string; end?: string };
 }
@@ -511,6 +515,7 @@ function GanttView(props: CoreProps & {
   }, []);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
+  const loadInnerRef = useRef<HTMLDivElement>(null);
   // b0..b1 and c0..c1 include the overscan margin; v0..v1 and t0..t1 are what is actually on screen.
   const [view, setView] = useState({ b0: 0, b1: 1, c0: 0, c1: 1, v0: 0, v1: 1, t0: 0, t1: 1, h: 600 });
   // Right after a zoom only what is on screen is redrawn; the margin follows in a later task, so the
@@ -544,6 +549,7 @@ function GanttView(props: CoreProps & {
     const st = el.scrollTop, sl = el.scrollLeft; // reads first …
     if (gridBodyRef.current) gridBodyRef.current.scrollTop = st; // … then writes
     if (headerRef.current) headerRef.current.scrollLeft = sl;
+    if (loadInnerRef.current) loadInnerRef.current.style.transform = `translateX(${-sl}px)`;
     measure(st, sl);
   }, [measure]);
   useLayoutEffect(() => { measure(); }, [measure, rows, scale]);
@@ -760,6 +766,9 @@ function GanttView(props: CoreProps & {
   const [plDate, setPlDate] = useState<string | null>(null);
   const [showRollups, setShowRollups] = useState(false);
   const [showSCurve, setShowSCurve] = useState(false);
+  // Resources (Phase 9): the load panel, levelling, assignment by drag and drop, the backlog.
+  const [showLoad, setShowLoad] = useState(false);
+  const [chartBox, setChartBox] = useState({ left: 0, width: 0 });
   const critical = useMemo(() => (showCritical && analysis ? new Set([...analysis.tasks].filter(([, t]) => t.critical).map(([id]) => id)) : null), [showCritical, analysis]);
   const criticalLinks = useMemo(() => {
     if (!critical || !analysis) return null;
@@ -986,6 +995,47 @@ function GanttView(props: CoreProps & {
       select(out); say(m.selectedBars(i18n.num(out.length)));
     };
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  };
+
+  /** Resource levelling (E6) as one undoable change. */
+  const levelRes = () => {
+    const r = levelResources(dataRef.current);
+    const names = r.unresolved.map((id) => baseModel.tasks.get(id)?.name ?? id).join(', ');
+    if (!r.changes.length) { say(r.unresolved.length ? m.levelUnresolved(names) : m.levelNothing); return; }
+    void run({ type: 'batch', label: 'level', ops: r.changes.map((c) => ({ type: 'task.update' as const, id: c.id, fields: c.fields })) }, 'user')
+      .then((x) => say(!x.ok ? x.reason : m.levelled(i18n.num(r.changes.length)) + (r.unresolved.length ? ` · ${m.levelUnresolved(names)}` : '')));
+  };
+  /** Drops on the chart: a resource onto a bar assigns it (E2); a backlog item becomes a task there (D5). */
+  const onChartDrop = (e: React.DragEvent) => {
+    const rid = e.dataTransfer.getData('application/x-gantt-resource');
+    const bid = e.dataTransfer.getData('application/x-gantt-backlog');
+    if (!rid && !bid) return;
+    e.preventDefault();
+    if (rid) {
+      const bar = (e.target as HTMLElement).closest<HTMLElement>('.gx-bar[data-task]');
+      const id = bar?.dataset.task; const t = id ? baseModel.tasks.get(id) : undefined;
+      if (!t || t.type !== 'task' || (baseModel.children.get(t.id)?.length ?? 0) > 0) return;
+      const why = whyNotEdit(t.id, 'resources'); if (why) { say(why); return; }
+      if (t.resources?.some((a) => a.id === rid)) return;
+      commit({ type: 'task.update', id: t.id, fields: { resources: [...(t.resources ?? []), { id: rid, allocation: 1 }] } });
+      say(m.assigned(data.resources?.find((r) => r.id === rid)?.name ?? rid, t.name));
+      return;
+    }
+    const item = props.backlog?.find((b) => b.id === bid); if (!item) return;
+    const why = whyNotCreate(''); if (why) { say(why); return; }
+    const canvas = canvasRef.current!.getBoundingClientRect();
+    const day = Math.floor((e.clientX - canvas.left) / scale.pxPerDay) + scale.origin;
+    const rs = geom.current.rows; const k = rowAt(rs, e.clientY - canvas.top); const row = rs[k];
+    const at = row ? baseModel.tasks.get(row.taskId) : undefined;
+    // Onto a summary or lane: inside it. Onto a task: after it, among its siblings. Below the rows: at the end.
+    const parent = at && (row!.lane || (baseModel.children.get(at.id)?.length ?? 0) > 0 || at.type === 'summary') ? at.id : at?.parent ?? null;
+    const sibs = baseModel.children.get(parent) ?? [];
+    const index = at && parent !== at.id ? sibs.indexOf(at.id) + 1 : sibs.length;
+    const id = newId();
+    const cal = baseModel.placement.calendar;
+    runTree(newTaskOps(baseModel, parent, index, { id, name: item.name, type: 'task', kind: item.kind, start: fromDay(cal.nextWorking(day)), duration: item.duration ?? 1 }), 'backlog', () => {
+      props.onBacklogUsed?.(item, id); select([{ type: 'row', taskId: id }]);
+    });
   };
 
   // Drawing a dependency with the keyboard (F9): L on the predecessor, then Enter on the successor.
@@ -1312,6 +1362,13 @@ function GanttView(props: CoreProps & {
   const longVisible = useMemo(() => linkBuckets.long.filter((x) => x.b1 >= lb0 && x.b0 < lb1).map((x) => x.l), [linkBuckets, lb0, lb1]);
 
   const statusDay = plDate ? toDay(plDate) : todayDay;
+  const loadPeriod = level.pxPerDay >= 40 ? 'day' as const : level.pxPerDay >= 8 ? 'week' as const : 'month' as const;
+  const load = useMemo(() => (showLoad ? resourceLoad(data, baseModel.placement, { period: loadPeriod }) : null), [showLoad, data, baseModel, loadPeriod]);
+  useLayoutEffect(() => {
+    const c = chartRef.current, r = rootRef.current; if (!showLoad || !c || !r) return;
+    const upd = () => { const a = c.getBoundingClientRect(), b = r.getBoundingClientRect(); setChartBox((x) => (x.left === a.left - b.left && x.width === c.clientWidth ? x : { left: a.left - b.left, width: c.clientWidth })); if (loadInnerRef.current) loadInnerRef.current.style.transform = `translateX(${-c.scrollLeft}px)`; };
+    upd(); const ro = new ResizeObserver(upd); ro.observe(c); return () => ro.disconnect();
+  }, [showLoad, gridW, gridOff, load]);
   const plPoints = useMemo(() => (showPL ? progressLine(baseModel.placement, statusDay) : null), [showPL, baseModel, statusDay]);
   const curve = useMemo(() => (showSCurve ? sCurve(baseModel.placement, statusDay, chosenBaseline) : null), [showSCurve, baseModel, statusDay, chosenBaseline]);
   if (data.tasks.length === 0) {
@@ -1343,6 +1400,8 @@ function GanttView(props: CoreProps & {
             <input className="gx-input" type="date" value={fromDay(statusDay)} onChange={(e) => setPlDate(e.target.value || null)} onKeyDown={(e) => e.stopPropagation()} /></label>}
           <button className="gx-btn" aria-pressed={showRollups} onClick={() => setShowRollups((v) => !v)}>{m.rollups}</button>
           <button className="gx-btn" aria-pressed={showSCurve} aria-expanded={showSCurve} onClick={() => setShowSCurve((v) => !v)}>{m.sCurve}</button>
+          <button className="gx-btn" aria-pressed={showLoad} aria-expanded={showLoad} onClick={() => setShowLoad((v) => !v)}>{m.resourcesShow}</button>
+          {(data.resources?.length ?? 0) > 0 && <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? undefined} onClick={() => { if (!scheduleWhyNot) levelRes(); }}>{m.levelResources}</button>}
           <button className={`gx-btn${analysis?.issues.length ? ' gx-warn-btn' : ''}`} aria-haspopup="dialog" aria-expanded={!!problemsAt}
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setProblemsAt(problemsAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.problems(i18n.num(analysis?.issues.length ?? 0))}</button>
           <button className="gx-btn" aria-disabled={!props.history.canUndo || undefined} title={props.history.canUndo ? `${m.undo} (Ctrl+Z)` : m.nothingToUndo} onClick={() => void props.history.undo()}>{m.undo}</button>
@@ -1370,6 +1429,7 @@ function GanttView(props: CoreProps & {
           {props.saveState && <SaveIndicator state={props.saveState} />}
         </div>
       )}
+      {props.backlog && props.backlog.length > 0 && <Backlog items={props.backlog} />}
       {curve && <div className="gx-scurve" role="region" aria-label={m.sCurve}><SCurveChart curve={curve} statusDay={statusDay} baselineName={chosenBaseline?.name} /></div>}
       <div className="gx-main">
         <div className="gx-panes">
@@ -1438,6 +1498,8 @@ function GanttView(props: CoreProps & {
                 else if (link) { e.preventDefault(); openMenu(e.clientX, e.clientY, { type: 'link', linkId: link.dataset.link! }); }
               }}
               onKeyDown={(e) => { if (editKeys(e)) e.preventDefault(); }}
+              onDragOver={(e) => { const ty = e.dataTransfer.types; if (ty.includes('application/x-gantt-resource') || ty.includes('application/x-gantt-backlog')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
+              onDrop={onChartDrop}
               onPointerLeave={() => { if (!drag.active) pan.current = null; }}>
               <div className="gx-canvas" ref={canvasRef} style={{ width: chartWidth, height: H + sizes.row }}>
                 <div className="gx-window" style={{ top: win.y, height: win.h }}>
@@ -1472,6 +1534,7 @@ function GanttView(props: CoreProps & {
           return compact ? <div className="gx-sheet"><button className="gx-btn gx-small gx-sheet-close" aria-label={m.closePanel} onClick={() => select([])}>×</button>{panel}</div> : panel;
         })()}
       </div>
+      {load && <LoadPanel load={load} scale={scale} labelWidth={chartBox.left} innerRef={loadInnerRef} chartWidth={chartWidth} chartVisible={chartBox.width} />}
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
       {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}
