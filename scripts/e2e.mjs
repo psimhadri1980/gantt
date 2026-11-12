@@ -271,6 +271,12 @@ async function assertOnBar(page, id, x, y) {
 /** Scrolls to a task and waits until its bar stops moving (scrolling and redraws settle), so pointer coordinates are right. */
 async function scrollSettled(page, id) {
   await page.evaluate((i) => window.gantt.current.scrollToTask(i), id);
+  await page.waitForTimeout(400);
+  // Put the bar's start 60 px into the visible chart, so the whole bar is clear of the details panel on any machine.
+  await page.evaluate((i) => {
+    const c = document.querySelector('.gx-chart'), b = document.querySelector(`.gx-bar[data-task="${i}"]`);
+    if (c && b) c.scrollLeft += b.getBoundingClientRect().left - c.getBoundingClientRect().left - 60;
+  }, id);
   let last = '';
   for (let k = 0; k < 40; k++) {
     await page.waitForTimeout(100);
