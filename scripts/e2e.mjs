@@ -5,6 +5,9 @@ import { build, preview } from 'vite';
 import { chromium } from 'playwright-core';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { schedule } from '../packages/engine/src/index.ts';
+import { generate } from '../packages/mock/src/generate.ts';
+import smallSample from '../packages/mock/src/samples/small.json' with { type: 'json' };
 
 const root = new URL('../apps/demo/', import.meta.url).pathname;
 await build({ root, logLevel: 'warn' });
@@ -198,6 +201,45 @@ await test('holidays are shaded apart from weekends (G6)', async (page) => {
   await page.evaluate(() => window.gantt.current.scrollToTask('t17'));
   await page.locator('.gx-holiday').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => { throw new Error('no holiday shading around 24–25 Dec'); });
   if (!(await page.locator('.gx-nonwork:not(.gx-holiday)').count())) throw new Error('no weekend shading');
+});
+
+// ---------- Phase 4: scheduling ----------
+await test('the engine gives identical results in the browser worker and on the server (C11)', async (page) => {
+  await page.goto('http://127.0.0.1:5192/bench.html');
+  await page.waitForFunction(() => document.title.includes('ready'));
+  const samples = { small: smallSample, generated: generate({ tasks: 3000, linkDensity: 0.6, seed: 7 }), lanes: generate({ tasks: 2000, laneEvery: 2, seed: 3 }) };
+  for (const [name, doc] of Object.entries(samples)) {
+    const server = schedule(doc);
+    const expected = JSON.parse(JSON.stringify({ tasks: [...server.tasks].sort(([a], [b]) => a.localeCompare(b)), changes: server.changes, issues: server.issues, end: server.end }));
+    const browser = await page.evaluate((d) => window.__schedule(d), doc);
+    if (!browser.offThread) throw new Error('the engine did not run in the worker');
+    delete browser.offThread;
+    if (JSON.stringify(browser) !== JSON.stringify(expected)) throw new Error(`${name}: browser and server results differ`);
+  }
+});
+
+await test('moving a task moves its successors in the same change, and a cycle is refused with the reason (K1, C9)', async (page) => {
+  // Requirements (t2) → Sign-off (t4) → Data model (t7) → API layer (t8): move Requirements one week later.
+  const before = await page.evaluate(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').start);
+  const r = await page.evaluate(() => window.gantt.current.run({ type: 'task.update', id: 't2', fields: { start: '2026-11-09', end: null } }));
+  expectEq(r.ok, true, 'the move is accepted');
+  const after = await page.evaluate(() => Object.fromEntries(window.gantt.current.getData().tasks.filter((t) => ['t4', 't7', 't8'].includes(t.id)).map((t) => [t.id, t.start])));
+  if (!(after.t7 > before)) throw new Error(`Data model did not move: ${before} → ${after.t7}`);
+  expectEq(after.t4, '2026-11-20', 'Sign-off follows Requirements');
+  const inverse = r.inverse.map((o) => o.id);
+  if (!inverse.includes('t7') || !inverse.includes('t2')) throw new Error('the successors are not in the same operation');
+  const c = await page.evaluate(() => window.gantt.current.run({ type: 'link.create', link: { id: 'lx', source: 't8', target: 't2', type: 'FS' } }));
+  expectEq(c.ok, false, 'a cycle is refused');
+  if (!/cycle/i.test(c.reason)) throw new Error(`no explanation: ${c.reason}`);
+});
+
+await test('critical path highlighting and the Schedule button (C2, K1)', async (page) => {
+  await page.getByRole('button', { name: 'Critical path' }).click();
+  await page.locator('.gx-bar.gx-critical').first().waitFor();
+  await page.getByRole('button', { name: /^Schedule/ }).click();
+  await page.locator('.gx-toolbar-row [role="status"]', { hasText: /rescheduled|up to date/ }).waitFor();
+  await page.locator('[role="row"]', { hasText: 'Hypercare' }).click();
+  await page.locator('.gx-details', { hasText: 'Slack' }).waitFor();
 });
 
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------

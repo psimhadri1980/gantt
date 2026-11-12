@@ -58,6 +58,17 @@ export class WorkCalendar {
     while (left > 0) { d++; if (this.isWorking(d)) left--; }
     return d;
   }
+  /**
+   * Moves `n` working days from `d`: n = 0 gives the first working day on or after d; n > 0 that many
+   * working days later; n < 0 that many earlier (from the last working day on or before d).
+   */
+  shift(d: DayNum, n: number): DayNum {
+    n = Math.trunc(n);
+    if (n >= 0) { let x = this.nextWorking(d); while (n-- > 0) { x++; while (!this.isWorking(x)) x++; } return x; }
+    let x = this.prevWorking(d);
+    while (n++ < 0) { x--; while (!this.isWorking(x)) x--; }
+    return x;
+  }
   /** Number of working days from start to end, both inclusive. */
   workingDaysBetween(start: DayNum, end: DayNum): number {
     let n = 0;

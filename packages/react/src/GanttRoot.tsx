@@ -4,7 +4,7 @@ import { AccessEvaluator, filterDocument, mergeAccess, type AccessRules, type Co
 import type { LifecycleAction } from '@gantt/proposals';
 import type { GanttBackend, ProposalSummary, ServiceEvent, Snapshot } from '@gantt/service';
 import type { DataOperation, GanttOperation } from '@gantt/state';
-import { changeOf, CoreGantt, fmtDate, type GanttHandle, type GanttProps } from './Gantt.tsx';
+import { changesOf, CoreGantt, fmtDate, type GanttHandle, type GanttProps } from './Gantt.tsx';
 import { mergeMessages, makeI18n, type GanttMessages } from './i18n.ts';
 
 type EventName = ServiceEvent['type'];
@@ -149,7 +149,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
     queue.current = queue.current.then(async () => {
       setSave({ status: 'saving' });
       try {
-        const summary = await backend.change(target, ops.map((op) => changeOf(op)));
+        const summary = await backend.change(target, ops.flatMap((op) => changesOf(op)));
         setSave({ status: 'saved' });
         if (!target) setView({ kind: 'proposal', id: summary.id }); // K0c: the chart now shows the new Proposal
         await refresh();

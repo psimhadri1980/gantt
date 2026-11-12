@@ -1,7 +1,7 @@
 import { memo, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import { formatDay, type Model, type SelectionTarget } from '@gantt/state';
-import { fromDay, toDay, type DayNum, type Placement } from '@gantt/engine';
+import { fromDay, type DayNum, type Placement, type ScheduleResult } from '@gantt/engine';
 import { useI18n, type I18n } from './i18n.ts';
 
 export interface DetailsProps<T> {
@@ -36,23 +36,25 @@ interface Props {
   edit?: (taskId: string, fields: Partial<Task>) => unknown;
   /** Current, when comparing a Proposal with it (K4). */
   compare?: { base: RoadmapDocument; placement: Placement };
+  /** The engine's schedule analysis (C2): slack, critical, driving links, issues. */
+  analysis?: ScheduleResult | null;
 }
 
 const fmt = (d: DayNum | undefined, locale?: string) =>
   d === undefined ? '—' : formatDay(d, locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const readOnly = () => false; // Phase 1: the panel is read-only.
 
-export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare }: Props) {
+export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis }: Props) {
   const { t: m } = i18n;
   const primary = selection[selection.length - 1];
   let body: ReactNode;
-  if (!primary) body = <RoadmapSummary model={model} />;
+  if (!primary) body = <RoadmapSummary model={model} analysis={analysis} select={select} />;
   else if (selection.length > 1) body = <Multi model={model} selection={selection} />;
   else if (primary.type === 'link') {
     const l = model.doc.links.find((x) => x.id === primary.linkId);
     if (!l) body = <p className="gx-muted">{m.noLongerExists}</p>;
     else {
-      const Default = () => <LinkDetails link={l} model={model} select={select} kinds={kinds} />;
+      const Default = () => <LinkDetails link={l} model={model} select={select} kinds={kinds} analysis={analysis} />;
       const Custom = l.kind ? kinds?.links?.[l.kind]?.details : undefined;
       body = Custom ? <Custom item={l} model={model} select={select} canEdit={readOnly} Default={Default} /> : <Default />;
     }
@@ -60,7 +62,7 @@ export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds
     const t = model.tasks.get(primary.taskId);
     if (!t) body = <p className="gx-muted">{m.noLongerExists}</p>;
     else {
-      const Default = () => <TaskDetails task={t} model={model} select={select} kinds={kinds} whyNotEdit={whyNotEdit} edit={edit} compare={compare} />;
+      const Default = () => <TaskDetails task={t} model={model} select={select} kinds={kinds} whyNotEdit={whyNotEdit} edit={edit} compare={compare} analysis={analysis} />;
       const Custom = t.kind ? kinds?.rows?.[t.kind]?.details : undefined;
       const canEdit = (field: string) => !!edit && !!whyNotEdit && whyNotEdit(t.id, field) === null;
       body = <>
@@ -104,7 +106,7 @@ function EditField({ label, value, display, type, taskId, field, whyNotEdit, onC
   </>;
 }
 
-function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare }: { task: Task; model: Model; select: Props['select']; kinds?: GanttKinds; whyNotEdit?: Props['whyNotEdit']; edit?: Props['edit']; compare?: Props['compare'] }) {
+function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare, analysis }: { task: Task; model: Model; select: Props['select']; kinds?: GanttKinds; whyNotEdit?: Props['whyNotEdit']; edit?: Props['edit']; compare?: Props['compare']; analysis?: Props['analysis'] }) {
   const { t: m, locale, num, pct } = useI18n();
   const p = model.placement.byId.get(t.id)!;
   const kids = model.children.get(t.id) ?? [];
@@ -154,6 +156,15 @@ function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare 
             taskId={t.id} field="progress" whyNotEdit={whyNotEdit} onCommit={(v) => set({ progress: Math.min(1, Math.max(0, Number(v) / 100)) })}
             was={wasText(pct(p.progress), bp && pct(bp.progress))} />
         </>}
+        {(() => {
+          const a = analysis?.tasks.get(t.id);
+          if (!a || isSummary) return null;
+          const by = a.drivenBy ? model.doc.links.find((l) => l.id === a.drivenBy) : undefined;
+          return <>
+            <Field label={m.slack}>{m.slackDays(num(a.slack))}{a.critical && <> · <strong>{m.criticalTask}</strong></>}</Field>
+            {by && <Field label={m.drivenBy}><TaskRef id={by.source} model={model} select={select} /> {linkBtn(by)}</Field>}
+          </>;
+        })()}
         {t.constraint && <Field label={m.constraint}>{t.constraint.type}{t.constraint.date ? ` ${fmt(dayOf(t.constraint.date), locale)}` : ''}</Field>}
         {t.deadline && <Field label={m.deadline}>{fmt(dayOf(t.deadline), locale)}</Field>}
         {t.mode && t.mode !== 'auto' && <Field label={m.mode}>{t.mode}</Field>}
@@ -179,19 +190,17 @@ function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare 
   );
 }
 
-function LinkDetails({ link: l, model, select, kinds }: { link: Link; model: Model; select: Props['select']; kinds?: GanttKinds }) {
+function LinkDetails({ link: l, model, select, kinds, analysis }: { link: Link; model: Model; select: Props['select']; kinds?: GanttKinds; analysis?: Props['analysis'] }) {
   const { t: m, num } = useI18n();
   const a = model.placement.byId.get(l.source), b = model.placement.byId.get(l.target);
   const src = model.tasks.get(l.source)?.name ?? l.source, tgt = model.tasks.get(l.target)?.name ?? l.target;
-  // Satisfaction check on calendar days (Phase 4 replaces this with the engine's working-time result).
+  // Status from the engine, in working time: broken (by how much), or whether it sets the successor's start.
   let status = m.notChecked, broken = false;
-  if (a?.scheduled && b?.scheduled) {
-    const lag = l.lag ?? 0;
-    const need = { FS: a.end! + 1 + lag, SS: a.start! + lag, FF: a.end! + lag, SF: a.start! + lag }[l.type];
-    const have = l.type === 'FS' || l.type === 'SS' ? b.start! : b.end!;
-    const diff = have - need;
-    broken = diff < 0;
-    status = broken ? m.brokenBy(num(-diff)) : diff > 0 ? m.satisfiedSpare(num(diff)) : m.satisfied;
+  const issue = analysis?.issues.find((i) => i.kind === 'brokenDependency' && i.linkId === l.id);
+  const sets = !!analysis && [...analysis.tasks.values()].some((t) => t.drivenBy === l.id);
+  if (a?.scheduled && b?.scheduled && analysis) {
+    if (issue) { broken = true; status = m.brokenBy(num(issue.by ?? 0)); }
+    else status = sets ? m.setsDate : m.satisfied;
   }
   const kindDef = l.kind ? kinds?.links?.[l.kind] : undefined;
   return (
@@ -224,7 +233,7 @@ function Multi({ model, selection }: { model: Model; selection: SelectionTarget[
     </dl></section></div>;
 }
 
-function RoadmapSummary({ model }: { model: Model }) {
+function RoadmapSummary({ model, analysis, select }: { model: Model; analysis?: Props['analysis']; select: Props['select'] }) {
   const { t: m, locale, num, pct } = useI18n();
   const r = model.doc.roadmap, span = model.placement.span;
   const tops = model.children.get(null) ?? [];
@@ -242,6 +251,10 @@ function RoadmapSummary({ model }: { model: Model }) {
       <Field label={m.unscheduled}>{num(unscheduled)}</Field>
       <Field label={m.openProposals}>{num(model.doc.proposals?.length ?? 0)}</Field>
     </dl></section>
+    {analysis && analysis.issues.length > 0 && <section><h4>{m.issues}</h4><ul className="gx-list">
+      {analysis.issues.slice(0, 20).map((i, k) => <li key={k}>{i.linkId ? <button className="gx-link-btn" onClick={() => select({ type: 'link', linkId: i.linkId! })}>{i.message}</button>
+        : i.taskId ? <button className="gx-link-btn" onClick={() => select({ type: 'row', taskId: i.taskId! })}>{i.message}</button> : i.message}</li>)}
+    </ul></section>}
     <p className="gx-muted gx-hint">{m.keyboardHint}</p>
   </div>;
 }

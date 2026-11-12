@@ -12,7 +12,9 @@ export type DataOperation =
   | { type: 'task.delete'; id: string }
   | { type: 'link.create'; link: Link }
   | { type: 'link.update'; id: string; fields: Partial<Omit<Link, 'id'>> }
-  | { type: 'link.delete'; id: string };
+  | { type: 'link.delete'; id: string }
+  /** Several operations as one: one undo step and one set of Proposal changes (an edit plus the dates it moves). */
+  | { type: 'batch'; ops: DataOperation[]; label?: string };
 
 export type ViewOperation =
   | { type: 'row.expand'; id: string }
@@ -24,7 +26,10 @@ export type ViewOperation =
 
 export type GanttOperation = DataOperation | ViewOperation;
 
-export const isDataOperation = (op: GanttOperation): op is DataOperation => /^(task|link)\./.test(op.type);
+export const isDataOperation = (op: GanttOperation): op is DataOperation => /^(task|link)\./.test(op.type) || op.type === 'batch';
+
+/** The single operations inside an operation, in order. */
+export const flattenOps = (op: DataOperation): DataOperation[] => (op.type === 'batch' ? op.ops.flatMap(flattenOps) : [op]);
 
 export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo' }
 
@@ -49,6 +54,15 @@ export interface OperationHooks {
  * produce a document that would be refused on load (cycles, dangling ids, bad dates).
  */
 export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { doc: RoadmapDocument; inverse: DataOperation[] } | { error: string } {
+  if (op.type === 'batch') {
+    let cur = doc; const inverse: DataOperation[] = [];
+    for (const o of op.ops) {
+      const r = applyDataOperation(cur, o);
+      if ('error' in r) return r;
+      cur = r.doc; inverse.unshift(...r.inverse);
+    }
+    return { doc: cur, inverse };
+  }
   let tasks = doc.tasks, links = doc.links;
   let inverse: DataOperation[];
   const pick = <T extends object>(o: T, keys: string[]) => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]])) as Partial<T>;
@@ -100,7 +114,8 @@ export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { d
   return { doc: next, inverse };
 }
 
-const stripUndefined = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+/** Removes fields set to undefined, or to null (null crosses JSON; parent may be null). */
+const stripUndefined = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([k, v]) => v !== undefined && (v !== null || k === 'parent'))) as T;
 
 /**
  * Runs operations through interception, authorisation, application and notification, in that order.

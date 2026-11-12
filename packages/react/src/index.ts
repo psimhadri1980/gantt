@@ -7,3 +7,4 @@ export type { GanttKinds, KindDefinition, DetailsProps } from './Details.tsx';
 export type { SelectionTarget } from '@gantt/state';
 export { defaultMessages, type GanttMessages } from './i18n.ts';
 export type { ZoomLevel } from '@gantt/state';
+export { scheduleOffThread } from './engineClient.ts';

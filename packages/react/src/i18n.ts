@@ -134,6 +134,17 @@ export interface GanttMessages {
   closedReadOnly: (state: string) => string;
   returnedReason: (reason: string) => string;
   historyEntry: (who: string, action: string, date: string) => string;
+  // scheduling (Phase 4)
+  criticalPath: string;
+  scheduleHint: string;
+  scheduleUpToDate: string;
+  scheduleApplied: (n: string) => string;
+  slack: string;
+  slackDays: (n: string) => string;
+  criticalTask: string;
+  drivenBy: string;
+  setsDate: string;
+  issues: string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -259,6 +270,16 @@ export const defaultMessages: GanttMessages = {
   closedReadOnly: (state) => `The Proposal is ${state} and cannot be changed`,
   returnedReason: (r) => `Returned: ${r}`,
   historyEntry: (who, action, date) => `${date} · ${who} · ${action}`,
+  criticalPath: 'Critical path',
+  scheduleHint: 'Apply the calculated dates (successors after their predecessors)',
+  scheduleUpToDate: 'The schedule is up to date.',
+  scheduleApplied: (n) => `${n} tasks rescheduled.`,
+  slack: 'Slack',
+  slackDays: (n) => `${n} working days`,
+  criticalTask: 'On the critical path',
+  drivenBy: 'Start set by',
+  setsDate: 'This connector sets the successor’s start',
+  issues: 'Schedule issues',
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 

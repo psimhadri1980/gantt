@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const throttle = Number(arg('throttle', '1'));
-const BUDGET = { firstRenderMs: 1500, minFps: 50, pointerFeedbackMs: 50, longestTaskDuringInteractionMs: 100, longestTaskMs: 100 };
+const BUDGET = { scheduleMs: 500, firstRenderMs: 1500, minFps: 50, pointerFeedbackMs: 50, longestTaskDuringInteractionMs: 100, longestTaskMs: 100 };
 
 const root = new URL('../apps/demo/', import.meta.url).pathname;
 await build({ root, logLevel: 'warn' });
@@ -24,6 +24,7 @@ let failed = false;
 for (const layout of ['bars', 'lanes']) {
   const r = await page.evaluate((l) => window.__bench(l), layout);
   const checks = [
+    ['full reschedule in worker', `${r.scheduleMs} ms`, r.scheduleMs <= BUDGET.scheduleMs, `≤ ${BUDGET.scheduleMs} ms`],
     ['first render', `${r.firstRenderMs} ms`, r.firstRenderMs <= BUDGET.firstRenderMs, `≤ ${BUDGET.firstRenderMs} ms`],
     ['vertical scroll', `${r.verticalScroll.fps} fps (p95 frame ${r.verticalScroll.p95FrameMs} ms)`, r.verticalScroll.fps >= BUDGET.minFps, `≥ ${BUDGET.minFps} fps`],
     ['horizontal scroll', `${r.horizontalScroll.fps} fps (p95 frame ${r.horizontalScroll.p95FrameMs} ms)`, r.horizontalScroll.fps >= BUDGET.minFps, `≥ ${BUDGET.minFps} fps`],

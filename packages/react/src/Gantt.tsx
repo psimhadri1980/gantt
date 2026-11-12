@@ -1,13 +1,14 @@
 import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  applyDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel,
+  applyDataOperation, flattenOps, mergeChildren, barIndex, buildModel, OperationPipeline, formatDay, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel,
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
 } from '@gantt/state';
-import { fromDay, place, type DayNum, type Placement } from '@gantt/engine';
+import { fromDay, place, schedule, type DayNum, type Placement } from '@gantt/engine';
 import { checkChange, type AccessEvaluator } from '@gantt/access';
-import { placeOffThread } from './engineClient.ts';
+import { placeOffThread, scheduleOffThread } from './engineClient.ts';
+import type { ScheduleResult } from '@gantt/engine';
 import { DetailsPanel, type GanttKinds } from './Details.tsx';
 import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
 import './gantt.css';
@@ -54,6 +55,11 @@ export interface GanttProps {
   laneTrackHeight?: number;
   /** Shade weekends and holidays from the roadmap calendar (G6). Default true. */
   highlightNonWorking?: boolean;
+  /**
+   * Reschedule after every edit that affects dates (K1, C1): successors move with the change, inside the
+   * same operation. Default true. A change that would create a dependency cycle is refused (C9).
+   */
+  autoSchedule?: boolean;
   /** Read-only mode (G9): every data operation is refused; a string is the reason shown. Viewing, selecting and zooming still work. */
   readOnly?: boolean | string;
   /** Override any visible text (G12). Dates and numbers follow `locale`. */
@@ -84,7 +90,13 @@ interface ViewBridge {
   fit: () => void;
 }
 
-export interface ToolbarProps { zoom: string; levels: ZoomLevel[]; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void }
+export interface ToolbarProps {
+  zoom: string; levels: ZoomLevel[]; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void;
+  /** Critical path highlighting (C2). */
+  critical: boolean; setCritical: (on: boolean) => void;
+  /** Apply the computed schedule to the roadmap (K1); `scheduleWhyNot` explains a disabled button (F14). */
+  runSchedule: () => void; scheduleWhyNot: string | null;
+}
 
 /**
  * Rendering strategy (ADR-001, condition 2): rows are cut into memoised blocks of BLOCK rows, and the time
@@ -110,6 +122,8 @@ interface Compare { base: Placement; diff: Map<string, 'added' | 'changed'> }
 interface Ctx {
   model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>;
   loadState: ReadonlyMap<string, string>; compare: Compare | null; editing: string | null;
+  /** Tasks on the critical path while highlighting is on (C2). */
+  critical: ReadonlySet<string> | null;
 }
 
 /**
@@ -128,9 +142,43 @@ export interface CoreProps extends GanttProps {
   header?: ReactNode;
 }
 
+const SCHEDULE_FIELDS = new Set(['start', 'end', 'duration', 'durationUnit', 'constraint', 'mode', 'parent', 'type']);
+/** Whether an operation can move dates (so the schedule must be recalculated). */
+export function affectsSchedule(op: DataOperation): boolean {
+  if (op.type === 'batch') return op.ops.some(affectsSchedule);
+  if (op.type === 'task.update') return Object.keys(op.fields).some((f) => SCHEDULE_FIELDS.has(f));
+  if (op.type === 'link.update') return 'type' in op.fields || 'lag' in op.fields || 'lagUnit' in op.fields || 'source' in op.fields || 'target' in op.fields;
+  return true;
+}
+
+/**
+ * The date changes the schedule needs (K1), as task updates; a cycle is refused (C9). Each moved task must
+ * be one the user may change: moving a task they cannot change is refused with the reason.
+ */
+export function rescheduleOps(doc: RoadmapDocument, ev?: AccessEvaluator): { ops: DataOperation[] } | { error: string } {
+  const s = schedule(doc);
+  if (s.cycle) return { error: s.issues[0]!.message };
+  const byId = new Map(doc.tasks.map((t) => [t.id, t]));
+  const ops: DataOperation[] = [];
+  for (const c of s.changes) {
+    const t = byId.get(c.id)!;
+    const fields: Partial<Task> = t.end ? { start: c.start, end: null as unknown as undefined } : { start: c.start };
+    if (ev) {
+      const d = checkChange(ev, { entity: 'task', op: 'update', id: c.id, fields: { start: c.start } }, t as never, doc.roadmap.id);
+      if (!d.allowed && !ev.can('schedule.run', { project: doc.roadmap.id })) return { error: `This would also move “${t.name}”, which you may not change (${d.reason})` };
+    }
+    ops.push({ type: 'task.update', id: c.id, fields });
+  }
+  return { ops };
+}
+
 /** Maps a data operation to the change shape the access rules are written for. */
-export function changeOf(op: DataOperation): { entity: 'task' | 'link'; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> } {
+export type ChangeOf = { entity: 'task' | 'link'; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> };
+/** The changes an operation makes, flattened. */
+export function changesOf(op: DataOperation): ChangeOf[] { return flattenOps(op).map(changeOf); }
+export function changeOf(op: DataOperation): ChangeOf {
   switch (op.type) {
+    case 'batch': throw new Error('use changesOf for a batch');
     case 'task.create': return { entity: 'task', op: 'create', id: op.task.id, fields: { ...op.task } };
     case 'task.update': return { entity: 'task', op: 'update', id: op.id, fields: op.fields as Record<string, unknown> };
     case 'task.delete': return { entity: 'task', op: 'delete', id: op.id };
@@ -161,10 +209,11 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
         authorize: (op, ctx) => {
           const ev = p.evaluator;
           if (ev) {
-            const c = changeOf(op);
-            const task = c.entity === 'task' ? docRef.current.tasks.find((t) => t.id === c.id) : undefined;
-            const d = checkChange(ev, c, task as never, docRef.current.roadmap.id);
-            if (!d.allowed) return d.reason!;
+            for (const c of changesOf(op)) {
+              const task = c.entity === 'task' ? docRef.current.tasks.find((t) => t.id === c.id) : undefined;
+              const d = checkChange(ev, c, task as never, docRef.current.roadmap.id);
+              if (!d.allowed) return d.reason!;
+            }
           }
           return p.authorize ? p.authorize(op, ctx) : true;
         },
@@ -179,12 +228,21 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
     (op) => {
       const r = applyDataOperation(docRef.current, op);
       if ('error' in r) return r;
-      docRef.current = r.doc;
-      const from = propsRef.current.data;
-      setWorking({ from, doc: r.doc });
-      propsRef.current.onDataChanged?.(r.doc, op);
-      propsRef.current.onCommit?.(op, r.doc);
-      return { inverse: r.inverse };
+      // Successors move with the edit, in the same operation (K1).
+      const s = propsRef.current.autoSchedule !== false && affectsSchedule(op) ? rescheduleOps(r.doc, propsRef.current.evaluator) : { ops: [] as DataOperation[] };
+      if ('error' in s) return { error: s.error };
+      let doc = r.doc, inverse = r.inverse, committed = op;
+      if (s.ops.length) {
+        const r2 = applyDataOperation(doc, { type: 'batch', ops: s.ops });
+        if ('error' in r2) return r2;
+        doc = r2.doc; inverse = [...r2.inverse, ...r.inverse];
+        committed = { type: 'batch', ops: [op, ...s.ops], label: 'reschedule' };
+      }
+      docRef.current = doc;
+      setWorking({ from: propsRef.current.data, doc });
+      propsRef.current.onDataChanged?.(doc, committed);
+      propsRef.current.onCommit?.(committed, doc);
+      return { inverse };
     },
     (op) => { if (!viewRef.current) throw new Error('the chart is still loading'); viewRef.current.apply(op); },
   ), []);
@@ -535,7 +593,31 @@ function GanttView(props: CoreProps & {
   }, [props.compareWith, data.tasks]);
   // Inline editing of a task name in the grid (D7).
   const [editing, setEditing] = useState<string | null>(null);
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing }), [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing]);
+  // Schedule analysis from the engine, off the main thread (C2, C11).
+  const [analysis, setAnalysis] = useState<ScheduleResult | null>(null);
+  useEffect(() => {
+    let live = true;
+    scheduleOffThread(data).then((r) => { if (live) setAnalysis(r.result); }, () => {});
+    return () => { live = false; };
+  }, [data]);
+  const [showCritical, setShowCritical] = useState(false);
+  const critical = useMemo(() => (showCritical && analysis ? new Set([...analysis.tasks].filter(([, t]) => t.critical).map(([id]) => id)) : null), [showCritical, analysis]);
+  const criticalLinks = useMemo(() => {
+    if (!critical || !analysis) return null;
+    const out = new Set<string>();
+    for (const [id, t] of analysis.tasks) if (t.drivenBy && critical.has(id)) out.add(t.drivenBy);
+    return out;
+  }, [critical, analysis]);
+  const scheduleWhyNot = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : i18n.t.readOnly)
+    : props.evaluator && !props.evaluator.can('schedule.run', { project: data.roadmap.id }) ? 'Missing permission: schedule.run' : null;
+  const [scheduleNote, setScheduleNote] = useState('');
+  const runSchedule = useCallback(() => {
+    const r = rescheduleOps(data, props.evaluator);
+    if ('error' in r) { setScheduleNote(r.error); return; }
+    if (!r.ops.length) { setScheduleNote(i18n.t.scheduleUpToDate); return; }
+    void run({ type: 'batch', ops: r.ops, label: 'schedule' }, 'user').then((x) => setScheduleNote(x.ok ? i18n.t.scheduleApplied(i18n.num(r.ops.length)) : x.reason));
+  }, [data, props.evaluator, run, i18n]);
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical }), [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical]);
   // What the user may change, with the reason when not (F14, L4).
   const whyNotEdit = useCallback((taskId: string, field: string): string | null => {
     const ro = props.readOnly;
@@ -656,7 +738,9 @@ function GanttView(props: CoreProps & {
       {props.header}
       {Toolbar && (
         <div className="gx-toolbar-row">
-          <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit} />
+          <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit}
+            critical={showCritical} setCritical={setShowCritical} runSchedule={runSchedule} scheduleWhyNot={scheduleWhyNot} />
+          {scheduleNote && <span className="gx-muted" role="status">{scheduleNote}</span>}
           <button className="gx-btn" onClick={() => setGridHidden((h) => !h)} aria-pressed={!gridHidden}>{gridHidden ? m.showGrid : m.hideGrid}</button>
           {props.saveState && <SaveIndicator state={props.saveState} />}
         </div>
@@ -713,8 +797,8 @@ function GanttView(props: CoreProps & {
                       <path d="M0,0 L8,4 L0,8 z" className="gx-arrowhead" />
                     </marker>
                   </defs>
-                  {chartBlocks.map((b) => <LinkGroup key={'l' + b.index} links={linkBuckets.byBlock[b.index]} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} />)}
-                  <LinkGroup links={longVisible} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} />
+                  {chartBlocks.map((b) => <LinkGroup key={'l' + b.index} links={linkBuckets.byBlock[b.index]} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} critical={criticalLinks} />)}
+                  <LinkGroup links={longVisible} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} critical={criticalLinks} />
                 </svg>
                 {chartBlocks.map((b) => <BarBlock key={'b' + b.index} block={b} ctx={ctx} api={api} scale={scale} bars={bars}
                   focus={focus.row >= b.start && focus.row < b.start + BLOCK ? focus : null} />)}
@@ -723,7 +807,7 @@ function GanttView(props: CoreProps & {
           </div>
         </div>
         {detailsPanel && <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n}
-          whyNotEdit={whyNotEdit} edit={editTask} compare={compare ? { base: props.compareWith!, placement: compare.base } : undefined} />}
+          whyNotEdit={whyNotEdit} edit={editTask} compare={compare ? { base: props.compareWith!, placement: compare.base } : undefined} analysis={analysis} />}
       </div>
       <Tooltip setterRef={tipRef} />
       <div className="gx-sr" aria-live="polite">{announce}</div>
@@ -788,7 +872,7 @@ const RowBgBlock = memo(function RowBgBlock({ block, selKeys }: { block: Block; 
 
 const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   { block: Block; ctx: Ctx; api: Api; scale: Scale; bars: ReturnType<typeof barIndex>; focus: { row: number; bar: number } | null }) {
-  const { model, selKeys, linkMarked, compare } = ctx;
+  const { model, selKeys, linkMarked, compare, critical } = ctx;
   const i18n = useI18n();
   return <>{block.rows.flatMap((r, k) => r.bars.map((b, bi) => {
     const p = model.placement.byId.get(b.taskId)!;
@@ -801,7 +885,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     const isSummary = t.type === 'summary' || (!r.lane && (model.children.get(t.id)?.length ?? 0) > 0);
     const row = block.start + k;
     const focused = !!focus && focus.row === row && (r.lane ? bi === focus.bar : focus.bar < 0);
-    const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}`;
+    const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}${critical?.has(t.id) ? ' gx-critical' : ''}`;
     const onClick = (e: React.MouseEvent) => { e.stopPropagation(); api.focus(row, r.lane ? bi : -1); api.select(r.lane ? { type: 'bar', taskId: t.id, bar: 'main' } : { type: 'row', taskId: t.id }, e.ctrlKey || e.metaKey); };
     const tipOn = (e: React.PointerEvent) => api.tip(e.clientX, e.clientY, taskTip(t, model, i18n));
     const tipOff = () => api.tip(0, 0, null);
@@ -823,14 +907,14 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   }))}</>;
 });
 
-const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, api }:
-  { links: Link[] | undefined; model: Model; bars: ReturnType<typeof barIndex>; scale: Scale; selKeys: ReadonlySet<string>; api: Api }) {
+const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, api, critical }:
+  { links: Link[] | undefined; model: Model; bars: ReturnType<typeof barIndex>; scale: Scale; selKeys: ReadonlySet<string>; api: Api; critical: ReadonlySet<string> | null }) {
   const i18n = useI18n();
   return <>{(links ?? []).map((l) => {
     const d = linkPath(l, model.placement, bars, scale);
     if (!d) return null;
     return (
-      <g key={l.id} className={`gx-link${selKeys.has(`link:${l.id}`) ? ' gx-sel' : ''}${l.kind ? ` gx-kind-${cssId(l.kind)}` : ''}`}>
+      <g key={l.id} className={`gx-link${selKeys.has(`link:${l.id}`) ? ' gx-sel' : ''}${l.kind ? ` gx-kind-${cssId(l.kind)}` : ''}${critical?.has(l.id) ? ' gx-critical' : ''}`}>
         <path d={d} className="gx-link-line" markerEnd="url(#gx-arrow)" />
         <path d={d} className="gx-link-hit" onClick={(e) => { e.stopPropagation(); api.select({ type: 'link', linkId: l.id }, e.ctrlKey || e.metaKey); }}
           onPointerMove={(e) => api.tip(e.clientX, e.clientY, linkTip(l, model, i18n))} onPointerLeave={() => api.tip(0, 0, null)} />
@@ -873,7 +957,7 @@ function Tooltip({ setterRef }: { setterRef: React.RefObject<(s: TipState | null
   return tip ? <div className="gx-tooltip" role="tooltip" style={{ left: tip.x + 12, top: tip.y + 14 }}>{tip.content}</div> : null;
 }
 
-function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit }: ToolbarProps) {
+function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit, critical, setCritical, runSchedule, scheduleWhyNot }: ToolbarProps) {
   const { t: m } = useI18n();
   return (
     <div className="gx-toolbar" role="toolbar" aria-label={m.toolbarLabel}>
@@ -882,6 +966,9 @@ function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit }: ToolbarPr
       </div>
       <button className="gx-btn" onClick={scrollToToday}>{m.today}</button>
       <button className="gx-btn" onClick={fit}>{m.fit}</button>
+      <button className="gx-btn" aria-pressed={critical} onClick={() => setCritical(!critical)}>{m.criticalPath}</button>
+      <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? m.scheduleHint}
+        onClick={() => { if (!scheduleWhyNot) runSchedule(); }}>{m.schedule}{scheduleWhyNot && <span className="gx-sr">{scheduleWhyNot}</span>}</button>
     </div>
   );
 }

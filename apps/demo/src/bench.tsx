@@ -1,7 +1,7 @@
 // Performance benchmark page (Phase 1 budget). Driven by scripts/bench.mjs; also usable by hand at /bench.html.
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { Gantt, type AccessRules } from '@gantt/react';
+import { Gantt, scheduleOffThread, type AccessRules } from '@gantt/react';
 import { generate, loadMock } from '@gantt/mock';
 import type { RoadmapDocument } from '@gantt/contract';
 
@@ -97,6 +97,10 @@ async function run(layout: 'bars' | 'lanes') {
     fb.push(performance.now() - t);
   }
   const pointerFeedbackMs = Math.round(pct(fb, 0.95));
+  // 6. Full schedule recalculation in the worker (Phase 4: under 500 ms off the main thread).
+  const sched: number[] = [];
+  for (let i = 0; i < 3; i++) { const t = performance.now(); const r = await scheduleOffThread(doc); if (!r.offThread) throw new Error('engine did not run in the worker'); sched.push(performance.now() - t); }
+  const scheduleMs = Math.round(Math.min(...sched));
   phase('click');
 
   return {
@@ -105,8 +109,14 @@ async function run(layout: 'bars' | 'lanes') {
     longestTaskMs: Math.round(Math.max(renderLong, scrollLong, phases.click!)),
     longestTaskDuringInteractionMs: Math.round(Math.max(scrollLong, phases.click!)),
     longTaskByPhase: { ...phases },
+    scheduleMs,
   };
 }
 
 (window as unknown as { __bench: typeof run }).__bench = run;
+// For the browser-versus-server comparison (Phase 4): the engine's result in the worker, as plain data.
+(window as unknown as { __schedule: unknown }).__schedule = async (d: RoadmapDocument) => {
+  const r = await scheduleOffThread(d);
+  return { offThread: r.offThread, tasks: [...r.result.tasks].sort(([a], [b]) => a.localeCompare(b)), changes: r.result.changes, issues: r.result.issues, end: r.result.end };
+};
 document.title = 'Gantt bench (ready)';
