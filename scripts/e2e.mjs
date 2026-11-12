@@ -646,6 +646,91 @@ await test('a Proposal expires when its phase limit passes on the mock clock (K2
   await page.getByRole('button', { name: 'New Proposal from this' }).waitFor();
 });
 
+// ---------- Phase 6: working together on Proposals ----------
+const viewProposal = async (page, id) => {
+  await page.locator(`.gx-pbar select option[value="p:${id}"]`).waitFor({ state: 'attached' });
+  await viewSelect(page).selectOption(`p:${id}`);
+  await page.locator('.gx-pbar .gx-state').waitFor();
+};
+
+await test('two users change the same field group in one Proposal: flagged, and Approve waits for a pick (K7, K8, K9)', async (page) => {
+  await proposals(page);
+  const id = await page.evaluate(() => {
+    const p = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't7', fields: { start: '2026-11-17' } }], 'Data model dates');
+    window.svc.change('frank', p.id, [{ entity: 'task', op: 'update', id: 't7', fields: { duration: 12 } }]);
+    window.svc.act('alice', p.id, 'submit');
+    return p.id;
+  });
+  await viewProposal(page, id);
+  await page.getByRole('button', { name: 'Concurrent changes (1)' }).waitFor();
+  await page.locator('.gx-row.gx-flagged .gx-name-text', { hasText: 'Data model' }).waitFor();
+  // The approver sees Approve disabled with the reason, picks a version, then approves.
+  await userSelect(page).selectOption('carol');
+  await viewProposal(page, id);
+  const approve = page.locator('.gx-pbar [data-action="approve"]');
+  await page.waitForFunction(() => /pick a version/.test(document.querySelector('.gx-pbar [data-action="approve"]')?.getAttribute('title') ?? ''));
+  await page.getByRole('button', { name: 'Concurrent changes (1)' }).click();
+  await page.getByRole('button', { name: 'Keep frank’s version' }).click();
+  await page.waitForFunction(() => !document.querySelector('.gx-pbar [data-action="approve"]')?.getAttribute('aria-disabled'));
+  await approve.click();
+  await page.waitForFunction(() => window.svc.snapshot('erin').version === 13);
+  const t7 = await page.evaluate(() => window.svc.snapshot('erin').current.tasks.find((t) => t.id === 't7'));
+  expectEq(t7.duration, 12, 'Frank’s version was approved');
+  expectEq(t7.start, '2026-11-16', 'Alice’s start was not kept');
+});
+
+await test('two users change different fields of one task: no flag (K7)', async (page) => {
+  await proposals(page);
+  const id = await page.evaluate(() => {
+    const p = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't7', fields: { name: 'Data model v2' } }]);
+    window.svc.change('frank', p.id, [{ entity: 'task', op: 'update', id: 't7', fields: { duration: 12 } }]);
+    return p.id;
+  });
+  await viewProposal(page, id);
+  await page.locator('.gx-name-text', { hasText: 'Data model v2' }).waitFor();
+  if (await page.locator('.gx-row.gx-flagged').count()) throw new Error('a task is flagged');
+  if (await page.getByRole('button', { name: /Concurrent changes/ }).count()) throw new Error('the concurrent-changes button is shown');
+});
+
+await test('parallel Proposals are warned; approving one makes the other stale live; Refresh with a choice clears it (K11–K18, H5)', async (page) => {
+  await proposals(page);
+  const [mine, theirs] = await page.evaluate(() => {
+    // As the chart records a move of a task with predecessors: the date plus a start-no-earlier-than constraint.
+    const a = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't7', fields: { start: '2026-11-18', constraint: { type: 'SNET', date: '2026-11-18' } } }, { entity: 'task', op: 'update', id: 't3', fields: { name: 'Arch review (mine)' } }], 'Mine');
+    const b = window.svc.change('frank', null, [{ entity: 'task', op: 'update', id: 't7', fields: { duration: 10 } }, { entity: 'task', op: 'update', id: 't2', fields: { name: 'Requirements (new)' } }], 'Theirs');
+    return [a.id, b.id];
+  });
+  await viewProposal(page, mine);
+  await page.getByRole('button', { name: 'Concurrent changes (1)' }).click();
+  await page.locator('.gx-concurrent').getByText('Also changed in another Proposal').waitFor(); // Alice may not see Frank's Proposal (K8)
+  // The Proposal list shows the shared task (K11).
+  await page.getByRole('button', { name: /^Proposals \(/ }).click();
+  await page.locator(`.gx-plist tr[data-proposal="${mine}"] .gx-chip.gx-warn`, { hasText: '1' }).waitFor();
+  await page.getByRole('button', { name: /^Proposals \(/ }).click();
+  // Frank's Proposal is approved elsewhere: Alice's view turns stale without a reload.
+  await page.evaluate((id) => { window.svc.act('frank', id, 'submit'); window.svc.act('carol', id, 'approve'); }, theirs);
+  await page.getByText('Current has changed: 1 newer version').first().waitFor();
+  await page.locator('.gx-row.gx-flagged .gx-name-text', { hasText: 'Data model' }).waitFor();
+  await page.getByRole('button', { name: 'Refresh Proposal' }).click();
+  const dlg = page.getByRole('dialog', { name: /Refresh from version 12 to 13/ });
+  await dlg.waitFor();
+  await dlg.getByText('Requirements (new)').waitFor(); // incoming without overlap, for information
+  const confirm = dlg.getByRole('button', { name: 'Confirm refresh' });
+  expectEq(await confirm.getAttribute('aria-disabled'), 'true', 'Confirm waits for every choice');
+  await dlg.getByRole('radio', { name: 'Keep mine' }).check();
+  await page.waitForFunction(() => !document.querySelector('.gx-modal .gx-primary')?.getAttribute('aria-disabled'));
+  await confirm.click();
+  await dlg.waitFor({ state: 'detached' });
+  await page.getByText('Refreshed from version 12 to 13').waitFor();
+  if (await page.getByText(/Current has changed: \d/).count()) throw new Error('still stale after refresh');
+  const doc = await page.evaluate((id) => window.svc.proposalDocument('alice', id), mine);
+  expectEq(doc.tasks.find((t) => t.id === 't2').name, 'Requirements (new)', 'incoming change taken');
+  expectEq(doc.tasks.find((t) => t.id === 't7').start, '2026-11-18', 'my start kept');
+  // The refresh can be undone.
+  await page.getByRole('button', { name: 'Undo refresh' }).click();
+  await page.getByText('Current has changed: 1 newer version').first().waitFor();
+});
+
 await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', async (page) => {
   await proposals(page);
   await page.evaluate(() => window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.3 } }]));
@@ -659,6 +744,31 @@ await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', asy
     const r = await window.axe.run(document.querySelector('.gx-root'), { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] });
     return r.violations.filter((x) => x.impact === 'serious' || x.impact === 'critical').map((x) => `${x.id} (${x.nodes.length}): ${x.nodes[0]?.target.join(' ')}`);
   });
+  if (v.length) throw new Error(v.join(' | '));
+});
+
+await test('accessibility scan of concurrent changes, the Proposal list and the refresh preview (axe, WCAG 2.2 AA)', async (page) => {
+  await proposals(page);
+  const mine = await page.evaluate(() => {
+    const a = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't7', fields: { duration: 9 } }], 'Mine');
+    window.svc.change('frank', a.id, [{ entity: 'task', op: 'update', id: 't7', fields: { start: '2026-11-19' } }]);
+    const b = window.svc.change('frank', null, [{ entity: 'task', op: 'update', id: 't7', fields: { duration: 11 } }], 'Theirs');
+    window.svc.act('frank', b.id, 'submit'); window.svc.act('carol', b.id, 'approve');
+    return a.id;
+  });
+  await viewProposal(page, mine);
+  await page.getByRole('button', { name: /Concurrent changes/ }).click();
+  await page.addScriptTag({ content: axeSource });
+  const scan = (sel) => page.evaluate(async (s) => {
+    const r = await window.axe.run(document.querySelector(s), { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] });
+    return r.violations.filter((x) => x.impact === 'serious' || x.impact === 'critical').map((x) => `${x.id} (${x.nodes.length}): ${x.nodes[0]?.target.join(' ')}`);
+  }, sel);
+  let v = await scan('.gx-root');
+  await page.getByRole('button', { name: /^Proposals \(/ }).click();
+  v = v.concat(await scan('.gx-root'));
+  await page.locator('.gx-plist').getByRole('button', { name: 'Refresh Proposal' }).click(); // from the list (K16)
+  await page.getByRole('dialog').waitFor();
+  v = v.concat(await scan('.gx-modal'));
   if (v.length) throw new Error(v.join(' | '));
 });
 

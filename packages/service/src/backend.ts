@@ -1,6 +1,6 @@
 import type { RoadmapDocument } from '@gantt/contract';
-import type { LifecycleAction } from '@gantt/proposals';
-import { ServiceError, type ChangeInput, type ProposalSummary, type RoadmapService, type ServiceEvent, type Snapshot } from './service.ts';
+import type { LifecycleAction, RefreshChoice } from '@gantt/proposals';
+import { ServiceError, type ChangeInput, type Concurrency, type ProposalSummary, type RefreshPreview, type RoadmapService, type ServiceEvent, type Snapshot } from './service.ts';
 
 /**
  * How the Gantt talks to whatever holds the roadmap (H4). Every method may refuse with a BackendError,
@@ -14,6 +14,14 @@ export interface GanttBackend {
   change(proposalId: string | null, changes: ChangeInput[], name?: string): Promise<ProposalSummary>;
   act(id: string, action: LifecycleAction, reason?: string): Promise<ProposalSummary>;
   newFrom(id: string): Promise<ProposalSummary>;
+  /** Concurrent changes and overlaps with parallel Proposals (K7, K8). */
+  concurrency(id: string): Promise<Concurrency>;
+  /** Keep one user's version of a task changed concurrently (K9). */
+  pick(id: string, taskId: string, keep: string): Promise<ProposalSummary>;
+  /** What a refresh onto the newest Current would do (K17). */
+  refreshPreview(id: string, choices: Record<string, RefreshChoice>): Promise<RefreshPreview>;
+  refresh(id: string, choices: Record<string, RefreshChoice>): Promise<ProposalSummary>;
+  undoRefresh(id: string): Promise<ProposalSummary>;
   /** Live events (proposalStale etc.). Returns an unsubscribe function. */
   subscribe(fn: (e: ServiceEvent) => void): () => void;
 }
@@ -39,6 +47,11 @@ export function memoryBackend(service: RoadmapService, userId: string): GanttBac
     change: (id, c, name) => wrap(() => service.change(userId, id, c, name)),
     act: (id, a, reason) => wrap(() => service.act(userId, id, a, reason)),
     newFrom: (id) => wrap(() => service.newFrom(userId, id)),
+    concurrency: (id) => wrap(() => service.concurrency(userId, id)),
+    pick: (id, taskId, keep) => wrap(() => service.pick(userId, id, taskId, keep)),
+    refreshPreview: (id, choices) => wrap(() => service.refreshPreview(userId, id, choices)),
+    refresh: (id, choices) => wrap(() => service.refresh(userId, id, choices)),
+    undoRefresh: (id) => wrap(() => service.undoRefresh(userId, id)),
     subscribe: (fn) => service.subscribeFor(userId, fn),
   };
 }
@@ -62,6 +75,11 @@ export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof f
     change: (id, changes, name) => call('POST', id ? `/proposals/${encodeURIComponent(id)}/changes` : '/proposals', { changes, name }),
     act: (id, action, reason) => call('POST', `/proposals/${encodeURIComponent(id)}/${action}`, { reason }),
     newFrom: (id) => call('POST', `/proposals/${encodeURIComponent(id)}/new-from`, {}),
+    concurrency: (id) => call('GET', `/proposals/${encodeURIComponent(id)}/concurrency`),
+    pick: (id, taskId, keep) => call('POST', `/proposals/${encodeURIComponent(id)}/pick`, { taskId, keep }),
+    refreshPreview: (id, choices) => call('POST', `/proposals/${encodeURIComponent(id)}/refresh-preview`, { choices }),
+    refresh: (id, choices) => call('POST', `/proposals/${encodeURIComponent(id)}/refresh`, { choices }),
+    undoRefresh: (id) => call('POST', `/proposals/${encodeURIComponent(id)}/undo-refresh`, {}),
     subscribe: (fn) => {
       if (typeof EventSource === 'undefined') return () => {};
       const es = new EventSource(`${baseUrl}/events?user=${encodeURIComponent(userId)}`);

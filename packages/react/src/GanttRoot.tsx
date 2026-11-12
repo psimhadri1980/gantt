@@ -1,8 +1,9 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RoadmapDocument } from '@gantt/contract';
 import { AccessEvaluator, filterDocument, mergeAccess, type AccessRules, type Condition } from '@gantt/access';
-import type { LifecycleAction } from '@gantt/proposals';
-import type { GanttBackend, ProposalSummary, ServiceEvent, Snapshot } from '@gantt/service';
+import type { LifecycleAction, RefreshChoice } from '@gantt/proposals';
+import type { Concurrency, GanttBackend, ProposalSummary, RefreshPreview, ServiceEvent, Snapshot } from '@gantt/service';
+import { ConcurrentPanel, ProposalList, RefreshDialog } from './together.tsx';
 import type { DataOperation, GanttOperation } from '@gantt/state';
 import { changesOf, CoreGantt, fmtDate, type GanttHandle, type GanttProps } from './Gantt.tsx';
 import { mergeMessages, makeI18n, type GanttMessages } from './i18n.ts';
@@ -92,7 +93,15 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   const [doc, setDoc] = useState<{ key: string; doc: RoadmapDocument } | null>(null);
   const [compare, setCompare] = useState(false);
   const [save, setSave] = useState<SaveState | undefined>();
+  const [statusLine, setStatusLine] = useState('');
   const propsRef = useRef(props); propsRef.current = props;
+  // Our own handle as well as the host's, so the panels can jump to a task.
+  const inner = useRef<GanttHandle | null>(null);
+  const setRef = useCallback((h: GanttHandle | null) => {
+    inner.current = h;
+    const f = propsRef.current.forwardedRef;
+    if (typeof f === 'function') f(h); else if (f) f.current = h;
+  }, []);
   const viewKey = view.kind === 'current' ? 'current' : view.kind === 'proposal' ? `p:${view.id}` : `v:${view.version}`;
 
   const refresh = useCallback(async () => {
@@ -132,6 +141,74 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   const viewRef = useRef(view); viewRef.current = view;
 
   const proposal = view.kind === 'proposal' ? snap?.proposals.find((p) => p.id === view.id) : undefined;
+  // Someone else changed, picked or refreshed this Proposal: show their version at once (H5).
+  const othersRev = proposal ? `${proposal.history.filter((h) => h.by !== backend.userId).length}:${proposal.baseVersion}` : '';
+  const firstRev = useRef(othersRev);
+  useEffect(() => {
+    if (firstRev.current === othersRev) return;
+    firstRev.current = othersRev;
+    if (proposal) void reloadDoc().catch(() => {});
+  }, [othersRev]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Concurrent changes and overlaps (K7, K8), and what a stale Proposal overlaps with Current (K12).
+  const [cc, setCc] = useState<Concurrency | null>(null);
+  const [incomingOverlap, setIncomingOverlap] = useState<string[]>([]);
+  useEffect(() => {
+    if (!proposal) { setCc(null); setIncomingOverlap([]); return; }
+    let live = true;
+    backend.concurrency(proposal.id).then((c) => { if (live) setCc(c); }, () => { if (live) setCc(null); });
+    if (proposal.stale) backend.refreshPreview(proposal.id, {}).then((pv) => { if (live) setIncomingOverlap(pv.overlaps.map((o) => o.taskId)); }, () => {});
+    else setIncomingOverlap([]);
+    return () => { live = false; };
+  }, [snap, proposal?.id, backend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const flags = useMemo(() => {
+    const f = new Map<string, string>();
+    for (const t of incomingOverlap) f.set(t, m.flagIncoming);
+    for (const o of cc?.parallel ?? []) f.set(o.taskId, m.flagParallel(o.proposal ? o.proposal.name : m.anotherProposal));
+    for (const c of cc?.inProposal ?? []) f.set(c.taskId, m.flagConcurrent(c.users.join(', ')));
+    return f;
+  }, [cc, incomingOverlap, m]);
+
+  // Refresh (K16–K18): a preview with choices that are kept if the dialog is left (K17c).
+  const savedChoices = useRef(new Map<string, Record<string, RefreshChoice>>());
+  const [dlg, setDlg] = useState<{ id: string; key: string; preview: RefreshPreview; choices: Record<string, RefreshChoice>; busy: boolean; error: string | null } | null>(null);
+  const openRefresh = useCallback(async (p: ProposalSummary) => {
+    const s0 = snapRef.current; if (!s0) return;
+    const key = `${p.id}:${s0.version}`;
+    const choices = savedChoices.current.get(key) ?? {};
+    try {
+      const preview = await backend.refreshPreview(p.id, choices);
+      setDlg({ id: p.id, key, preview, choices, busy: false, error: null });
+    } catch (e) { setStatusLine((e as Error).message); }
+  }, [backend]);
+  const setChoices = useCallback((choices: Record<string, RefreshChoice>) => {
+    setDlg((d) => (d ? { ...d, choices } : d));
+    const d = dlgRef.current; if (!d) return;
+    savedChoices.current.set(d.key, choices);
+    void backend.refreshPreview(d.id, choices).then((preview) => setDlg((x) => (x && x.key === d.key ? { ...x, preview, choices } : x)), () => {});
+  }, [backend]);
+  const dlgRef = useRef(dlg); dlgRef.current = dlg;
+  const confirmRefresh = useCallback(async () => {
+    const d = dlgRef.current; if (!d) return;
+    setDlg({ ...d, busy: true, error: null });
+    try {
+      const r = await backend.refresh(d.id, d.choices);
+      savedChoices.current.delete(d.key);
+      setDlg(null);
+      setStatusLine(m.refreshed(String(d.preview.fromVersion), String(d.preview.toVersion)));
+      void r;
+      await refresh(); await reloadDoc().catch(() => {});
+    } catch (e) { setDlg({ ...d, busy: false, error: (e as Error).message }); }
+  }, [backend, refresh, reloadDoc, m]);
+  const undoRefresh = useCallback(async (p: ProposalSummary) => {
+    try { await backend.undoRefresh(p.id); setStatusLine(''); await refresh(); await reloadDoc().catch(() => {}); }
+    catch (e) { setStatusLine((e as Error).message); }
+  }, [backend, refresh, reloadDoc]);
+  const pick = useCallback(async (taskId: string, keep: string) => {
+    const v = viewRef.current; if (v.kind !== 'proposal') return;
+    try { await backend.pick(v.id, taskId, keep); await refresh(); await reloadDoc().catch(() => {}); }
+    catch (e) { setStatusLine((e as Error).message); }
+  }, [backend, refresh, reloadDoc]);
 
   // Why the chart is read-only here (F14, K0b, K21).
   let readOnly: string | false = false;
@@ -172,7 +249,6 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   const snapRef = useRef(snap); snapRef.current = snap;
 
   // Lifecycle actions.
-  const [statusLine, setStatusLine] = useState('');
   const act = useCallback(async (p: ProposalSummary, action: LifecycleAction | 'newFrom', reason?: string) => {
     try {
       if (action === 'newFrom') { const n = await backend.newFrom(p.id); await refresh(); setView({ kind: 'proposal', id: n.id }); setStatusLine(''); return; }
@@ -193,16 +269,22 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
 
   const header = (
     <ProposalBar snap={snap} view={view} setView={setView} proposal={proposal} compare={compare} setCompare={setCompare} act={act}
+      cc={cc} pick={(t, k) => void pick(t, k)} onRefresh={(p) => void openRefresh(p)} onUndoRefresh={(p) => void undoRefresh(p)} now={Date.now()}
+      selectTask={(id) => { const h = inner.current; if (!h) return; h.scrollToTask(id); void h.run({ type: 'selection.set', selection: [{ type: 'row', taskId: id }] }); }}
       statusLine={statusLine} setStatusLine={setStatusLine} choice={choice} m={m} locale={props.locale} hide={props.deniedControls === 'hide'}
       choose={(target) => { const c = choice; setChoice(null); if (!c) return; if (target === undefined) { void reloadDoc(); return; } if (target) setView({ kind: 'proposal', id: target }); send(target, c.ops); }} />
   );
   const shown = doc && doc.key === viewKey ? doc.doc : null;
   const empty: RoadmapDocument = { contract: 'gantt-roadmap/1', roadmap: { id: 'none', name: '', version: 0, timeZone: 'UTC', start: new Date().toISOString().slice(0, 10) }, tasks: [], links: [] };
   return (
-    <CoreGantt {...props} ref={props.forwardedRef} data={shown ?? empty} evaluator={props.evaluator} header={header}
-      readOnly={readOnly} saveState={save} onCommit={onCommit} undoScope={viewKey}
+    <>
+    <CoreGantt {...props} ref={setRef} data={shown ?? empty} evaluator={props.evaluator} header={header}
+      readOnly={readOnly} saveState={save} onCommit={onCommit} undoScope={viewKey} flags={view.kind === 'proposal' ? flags : undefined}
       compareWith={compare && view.kind === 'proposal' && snap.current ? snap.current : undefined}
       emptyState={<>{header}<div className="gx-empty">{view.kind === 'current' && !snap.current ? m.currentNone : shown ? m.empty : m.loading}</div></>} />
+    {dlg && <div className="gx-root gx-layer" data-theme={props.theme}><RefreshDialog preview={dlg.preview} choices={dlg.choices} setChoices={setChoices} m={m} busy={dlg.busy} error={dlg.error}
+      onConfirm={() => void confirmRefresh()} onCancel={() => setDlg(null)} /></div>}
+    </>
   );
 }
 
@@ -210,7 +292,9 @@ const editableOwn = (s: Snapshot, user: string) => s.proposals.filter((p) => p.o
 
 const ACTIONS: LifecycleAction[] = ['submit', 'withdraw', 'review', 'approve', 'return', 'reject', 'discard'];
 
-function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide }: {
+function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide, cc, pick, onRefresh, onUndoRefresh, now, selectTask }: {
+  cc: Concurrency | null; pick: (taskId: string, keep: string) => void; onRefresh: (p: ProposalSummary) => void; onUndoRefresh: (p: ProposalSummary) => void;
+  now: number; selectTask: (id: string) => void;
   snap: Snapshot; view: View; setView: (v: View) => void; proposal?: ProposalSummary; compare: boolean; setCompare: (b: boolean) => void;
   act: (p: ProposalSummary, a: LifecycleAction | 'newFrom', reason?: string) => Promise<void>; statusLine: string; setStatusLine: (s: string) => void;
   choice: { ops: DataOperation[]; options: ProposalSummary[] } | null; choose: (target: string | null | undefined) => void;
@@ -219,6 +303,11 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
   const [asking, setAsking] = useState<'return' | 'reject' | null>(null);
   const [reason, setReason] = useState('');
   const [history, setHistory] = useState(false);
+  const [panel, setPanel] = useState<'list' | 'concurrent' | null>(null);
+  const ccCount = cc ? cc.inProposal.length + new Set(cc.parallel.map((o) => o.taskId)).size : 0;
+  const canRefresh = snap.can['proposal.refresh'] ? null : 'Missing permission: proposal.refresh';
+  const editable = proposal && (proposal.state === 'Draft' || proposal.state === 'Returned');
+  const canPick = editable ? (snap.can['proposal.edit'] ? null : 'Missing permission: proposal.edit') : (snap.can['proposal.approve'] ? null : 'Missing permission: proposal.approve');
   const { num } = makeI18n(m, locale);
   const day = (iso?: string) => (iso ? fmtDate(Math.floor(Date.parse(iso) / 86_400_000), locale) : '');
   const value = view.kind === 'current' ? 'current' : view.kind === 'proposal' ? `p:${view.id}` : `v:${view.version}`;
@@ -241,11 +330,13 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
             </optgroup>}
           </select>
         </label>
+        <button className="gx-btn" aria-pressed={panel === 'list'} aria-expanded={panel === 'list'} onClick={() => setPanel(panel === 'list' ? null : 'list')}>{m.proposals} ({num(snap.proposals.length)})</button>
         {proposal && <>
           <span className={`gx-chip gx-state gx-state-${proposal.state.toLowerCase()}`}>{m.state[proposal.state] ?? proposal.state}</span>
           <span className="gx-muted">{m.changesCount(num(proposal.changeCount))}</span>
           {proposal.expiresAt && proposal.phase && <span className="gx-muted">{m.expires(day(proposal.expiresAt), m.phaseName[proposal.phase] ?? proposal.phase)}</span>}
-          {proposal.stale && <span className="gx-chip gx-warn">{m.stale}</span>}
+          {proposal.stale && <span className="gx-chip gx-warn" role="status">{m.behind(num(proposal.behind))}</span>}
+          {ccCount > 0 && <button className="gx-btn gx-warn-btn" aria-pressed={panel === 'concurrent'} aria-expanded={panel === 'concurrent'} onClick={() => setPanel(panel === 'concurrent' ? null : 'concurrent')}>{m.concurrent(num(ccCount))}</button>}
           <button className="gx-btn" aria-pressed={compare} onClick={() => setCompare(!compare)} disabled={!snap.current}>{m.compare}</button>
           <button className="gx-btn" aria-pressed={history} aria-expanded={history} onClick={() => setHistory(!history)}>{m.history}</button>
         </>}
@@ -254,12 +345,18 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
         <div className="gx-pbar-row gx-pbar-actions" role="group" aria-label={m.proposalBar}>
           {ACTIONS.map((a) => {
             const why = proposal.actions?.[a];
+            // Where Approve would be, a stale Proposal shows the reason and the Refresh action (K19).
+            const refreshHere = a === 'approve' && proposal.stale && (why !== undefined) ? (
+              <button key="refresh" data-action="refresh" className="gx-btn gx-primary" aria-disabled={!!canRefresh || undefined} title={canRefresh ?? undefined}
+                onClick={() => { if (canRefresh) { setStatusLine(canRefresh); return; } onRefresh(proposal); }}>{m.refreshProposal}</button>
+            ) : null;
+            if (refreshHere && why?.startsWith('Not possible while')) return refreshHere;
             if (why === undefined) return null;
             // Actions that do not apply in this state are left out; a missing permission or a rule is explained (F14).
             if (why?.startsWith('Not possible while')) return null;
             if (why && hide && why.startsWith('Missing permission')) return null;
-            return (
-              <button key={a} data-action={a} className={`gx-btn${a === 'approve' ? ' gx-primary' : ''}`} aria-disabled={!!why || undefined} title={why ?? undefined}
+            return (<span key={a} className="gx-act">{refreshHere}
+              <button data-action={a} className={`gx-btn${a === 'approve' && !proposal.stale ? ' gx-primary' : ''}`} aria-disabled={!!why || undefined} title={why ?? undefined}
                 aria-describedby={why ? `gx-why-${a}` : undefined}
                 onClick={() => {
                   if (why) { setStatusLine(why); return; }
@@ -268,9 +365,14 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
                 }}>
                 {m.action[a]}
                 {why && <span id={`gx-why-${a}`} className="gx-sr">{why}</span>}
-              </button>
+              </button></span>
             );
           })}
+          {proposal.stale && !(proposal.actions?.approve !== undefined) && (
+            <button data-action="refresh" className="gx-btn gx-primary" aria-disabled={!!canRefresh || undefined} title={canRefresh ?? undefined}
+              onClick={() => { if (canRefresh) { setStatusLine(canRefresh); return; } onRefresh(proposal); }}>{m.refreshProposal}</button>
+          )}
+          {proposal.canUndoRefresh && <button className="gx-btn" data-action="undo-refresh" onClick={() => onUndoRefresh(proposal)}>{m.undoRefresh}</button>}
           {(closed || proposal.stale) && snap.can['proposal.create'] && proposal.state !== 'Approved' && (
             <button className="gx-btn" onClick={() => void act(proposal, 'newFrom')}>{m.action.newFrom}</button>
           )}
@@ -294,6 +396,13 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
         </div>
       )}
       {statusLine && <div className="gx-pbar-row gx-pbar-status" role="status">{statusLine}</div>}
+      {panel === 'list' && <div className="gx-pbar-panel" role="region" aria-label={m.proposals}>
+        <ProposalList snap={snap} m={m} locale={locale} now={now} open={(id) => { setView({ kind: 'proposal', id }); setPanel(null); }}
+          refresh={(p) => { setView({ kind: 'proposal', id: p.id }); setPanel(null); onRefresh(p); }} />
+      </div>}
+      {panel === 'concurrent' && cc && proposal && <div className="gx-pbar-panel" role="region" aria-label={m.concurrentTitle}>
+        <ConcurrentPanel cc={cc} m={m} canPick={canPick} pick={pick} select={selectTask} />
+      </div>}
       {history && proposal && (
         <ol className="gx-history" aria-label={m.history}>
           {proposal.history.map((h, i) => (

@@ -156,6 +156,7 @@ export interface Ctx {
   /** Tasks matching the filter; their ancestors are shown for context (D10). */
   matches: ReadonlySet<string> | null;
   barTemplate?: GanttProps['barTemplate']; tooltipTemplate?: GanttProps['tooltipTemplate'];
+  flags?: ReadonlyMap<string, string>;
   model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>;
   loadState: ReadonlyMap<string, string>; compare: Compare | null; editing: string | null;
   /** Tasks on the critical path while highlighting is on (C2). */
@@ -178,6 +179,8 @@ export interface CoreProps extends GanttProps {
   header?: ReactNode;
   /** Undo history is kept per scope (per Proposal, F8); it is cleared when this changes. */
   undoScope?: string;
+  /** Tasks flagged for working together (K8): task id → what is wrong, shown on the row and the bar. */
+  flags?: ReadonlyMap<string, string>;
 }
 
 const SCHEDULE_FIELDS = new Set(['start', 'end', 'duration', 'durationUnit', 'constraint', 'mode', 'parent', 'type']);
@@ -749,8 +752,8 @@ function GanttView(props: CoreProps & {
   }, [data, props.evaluator, run, i18n]);
   apiRef.current = api;
   menuRef.current = (x, y, t) => openMenuRef.current(x, y, t);
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate }),
-    [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate]);
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate, flags: props.flags }),
+    [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate, props.flags]);
   // What the user may change, with the reason when not (F14, L4).
   const whyNotEdit = useCallback((taskId: string, field: string): string | null => {
     const ro = props.readOnly;
@@ -1457,7 +1460,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     const isSummary = t.type === 'summary' || (!r.lane && (model.children.get(t.id)?.length ?? 0) > 0);
     const row = block.start + k;
     const focused = !!focus && focus.row === row && (r.lane ? bi === focus.bar : focus.bar < 0);
-    const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}${critical?.has(t.id) ? ' gx-critical' : ''}${ctx.matches && !ctx.matches.has(t.id) && !isGroupId(t.id) ? ' gx-context' : ''}`;
+    const cls = `gx-bar gx-${t.type === 'milestone' ? 'milestone' : isSummary ? 'summary' : 'task'}${sel ? ' gx-sel' : ''}${linkMarked.has(t.id) ? ' gx-marked' : ''}${focused ? ' gx-focus' : ''}${t.kind ? ` gx-kind-${cssId(t.kind)}` : ''}${critical?.has(t.id) ? ' gx-critical' : ''}${ctx.matches && !ctx.matches.has(t.id) && !isGroupId(t.id) ? ' gx-context' : ''}${ctx.flags?.has(t.id) ? ' gx-flagged' : ''}`;
     const onClick = (e: React.MouseEvent) => { e.stopPropagation(); api.focus(row, r.lane ? bi : -1); api.select(r.lane ? { type: 'bar', taskId: t.id, bar: 'main' } : { type: 'row', taskId: t.id }, e.ctrlKey || e.metaKey || e.shiftKey); };
     // While a button is held a drag owns the tooltip. A host template may wrap the default content (G7).
     const Tip = ctx.tooltipTemplate;

@@ -149,6 +149,7 @@ function NameCell({ r, t, ctx, api }: { r: RowLayout; t: Task; ctx: Ctx; api: Ap
     {compare?.diff.has(r.taskId) && <span className={`gx-badge gx-diff-badge-${compare.diff.get(r.taskId)}`}>{compare.diff.get(r.taskId) === 'added' ? m.diffAdded : m.diffChanged}</span>}
     {loadState.get(r.taskId) === 'loading' && <span className="gx-badge" role="status">{m.loadingChildren}</span>}
     {loadState.has(r.taskId) && loadState.get(r.taskId) !== 'loading' && <span className="gx-badge gx-badge-error" title={m.loadFailed(loadState.get(r.taskId)!)} role="status">⚠<span className="gx-sr">{m.loadFailed(loadState.get(r.taskId)!)}</span></span>}
+    {ctx.flags?.has(r.taskId) && <span className="gx-badge gx-flag" title={ctx.flags.get(r.taskId)} role="img" aria-label={ctx.flags.get(r.taskId)}>⚠</span>}
     {r.lane && <span className="gx-badge" title={m.laneBarsHint}>{m.laneBars(num(r.bars.length))}</span>}
     {laneOpen.has(r.taskId) && <button className="gx-twisty gx-relane" tabIndex={-1} aria-label={m.closeLane} onClick={(e) => { e.stopPropagation(); api.toggleLane(r.taskId); }}>⇤</button>}
   </>;
@@ -169,7 +170,7 @@ export const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: 
       <div key={r.taskId} data-row={i} data-task={r.taskId} role="row" aria-level={r.depth + 1} aria-rowindex={i + 2}
         aria-expanded={r.hasChildren && !r.lane ? r.expanded : undefined} aria-selected={selected}
         tabIndex={i === focusRow || (focusRow < 0 && i === 0) ? 0 : -1}
-        className={`gx-row${selected ? ' gx-sel' : ''}${linkMarked.has(r.taskId) ? ' gx-marked' : ''}${i === focusRow ? ' gx-focus' : ''}${r.lane ? ' gx-lane' : ''}${group ? ' gx-group' : ''}${matches && !matches.has(r.taskId) && !group ? ' gx-context' : ''}${compare?.diff.has(r.taskId) ? ` gx-diff-${compare.diff.get(r.taskId)}` : ''}`}
+        className={`gx-row${selected ? ' gx-sel' : ''}${linkMarked.has(r.taskId) ? ' gx-marked' : ''}${i === focusRow ? ' gx-focus' : ''}${r.lane ? ' gx-lane' : ''}${group ? ' gx-group' : ''}${matches && !matches.has(r.taskId) && !group ? ' gx-context' : ''}${ctx.flags?.has(r.taskId) ? ' gx-flagged' : ''}${compare?.diff.has(r.taskId) ? ` gx-diff-${compare.diff.get(r.taskId)}` : ''}`}
         style={{ top: r.top, height: r.height }}
         onFocus={() => api.focus(i, -1)}
         onPointerDown={(e) => api.rowPointerDown(e, i, r.taskId)}

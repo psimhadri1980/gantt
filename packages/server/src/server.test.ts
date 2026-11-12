@@ -50,6 +50,40 @@ describe('reference server over HTTP', () => {
     const dave = await as('dave').snapshot();
     expect(dave.current!.tasks.find((t) => t.id === 't2')).not.toHaveProperty('deadline');
   });
+  it('pushes stale and concurrent-change events, and refreshes over HTTP (H5, K15–K18)', async () => {
+    const seen: string[] = [];
+    // Server-sent events, read with fetch (Node has no EventSource).
+    const ctl = new AbortController();
+    const stream = await fetch(`${base}/events?user=alice`, { signal: ctl.signal });
+    const reader = stream.body!.getReader();
+    let buf = '';
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read(); if (done) break;
+          buf += new TextDecoder().decode(value);
+          for (const m of buf.matchAll(/data: (.*)\n\n/g)) seen.push(JSON.parse(m[1]!).type);
+          buf = buf.slice(buf.lastIndexOf('\n\n') + 2);
+        }
+      } catch { /* aborted */ }
+    })();
+    const mine = await as('alice').change(null, [{ entity: 'task', op: 'update', id: 't8', fields: { name: 'API layer (mine)' } }], 'Mine');
+    const theirs = await as('frank').change(null, [{ entity: 'task', op: 'update', id: 't8', fields: { name: 'API layer (theirs)' } }], 'Theirs');
+    await as('frank').act(theirs.id, 'submit');
+    await as('carol').act(theirs.id, 'approve');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(seen).toContain('concurrentChange');
+    expect(seen).toContain('proposalStale');
+    const cc = await as('alice').concurrency(mine.id);
+    expect(cc.parallel).toEqual([]); // the other one is approved now: no longer parallel
+    const pv = await as('alice').refreshPreview(mine.id, {});
+    expect(pv.overlaps.map((o) => o.taskId)).toEqual(['t8']);
+    expect(await refusal(as('alice').refresh(mine.id, {}))).toMatch(/^conflict: 1 overlapping task needs a choice/);
+    const r = await as('alice').refresh(mine.id, { t8: 'incoming' });
+    expect(r.stale).toBe(false);
+    expect((await as('alice').proposalDocument(mine.id)).tasks.find((t) => t.id === 't8')!.name).toBe('API layer (theirs)');
+    ctl.abort(); await pump;
+  });
   it('enforces field-level permissions on the API, not only in the interface', async () => {
     expect(await refusal(as('dave').change(null, [{ entity: 'task', op: 'update', id: 't7', fields: { start: '2026-11-20' } }]))).toBe('denied: Missing permission: task.modify.dates for the field “start”');
     expect(await refusal(as('dave').change(null, [{ entity: 'task', op: 'update', id: 't7', fields: { progress: 0.3 } }]))).toBe('ok');

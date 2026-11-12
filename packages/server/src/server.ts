@@ -24,11 +24,16 @@ export function createGanttServer(service: RoadmapService, opts: { allowOrigin?:
       if (req.method === 'GET' && parts[0] === 'versions' && parts[1]) return send(res, 200, service.versionDocument(user, Number(parts[1])));
       if (req.method === 'GET' && parts[0] === 'events') return events(req, res, service, user);
       if (req.method === 'GET' && parts[0] === 'proposals' && parts[2] === 'document') return send(res, 200, service.proposalDocument(user, parts[1]!));
+      if (req.method === 'GET' && parts[0] === 'proposals' && parts[2] === 'concurrency') return send(res, 200, service.concurrency(user, parts[1]!));
       if (req.method === 'POST' && parts[0] === 'proposals') {
         const body = await readJson(req);
         if (parts.length === 1) return send(res, 201, service.change(user, null, body.changes ?? [], body.name));
         if (parts[2] === 'changes') return send(res, 200, service.change(user, parts[1]!, body.changes ?? []));
         if (parts[2] === 'new-from') return send(res, 201, service.newFrom(user, parts[1]!));
+        if (parts[2] === 'pick') return send(res, 200, service.pick(user, parts[1]!, String(body.taskId ?? ''), String(body.keep ?? '')));
+        if (parts[2] === 'refresh-preview') return send(res, 200, service.refreshPreview(user, parts[1]!, body.choices ?? {}));
+        if (parts[2] === 'refresh') return send(res, 200, service.refresh(user, parts[1]!, body.choices ?? {}));
+        if (parts[2] === 'undo-refresh') return send(res, 200, service.undoRefresh(user, parts[1]!));
         if (ACTIONS.has(parts[2] as LifecycleAction)) return send(res, 200, service.act(user, parts[1]!, parts[2] as LifecycleAction, body.reason));
       }
       send(res, 404, { error: 'Not found', code: 'notFound' });

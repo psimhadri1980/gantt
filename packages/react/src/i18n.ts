@@ -217,6 +217,48 @@ export interface GanttMessages {
   apply: string;
   emptyValue: string;
   selectedBars: (n: string) => string;
+  // working together (Phase 6)
+  proposals: string;
+  colState: string;
+  colAge: string;
+  colExpires: string;
+  colChanges: string;
+  colShared: string;
+  ageDays: (n: string) => string;
+  behind: (n: string) => string;
+  refreshProposal: string;
+  undoRefresh: string;
+  refreshed: (from: string, to: string) => string;
+  concurrent: (n: string) => string;
+  concurrentTitle: string;
+  changedAtOnce: (users: string) => string;
+  alsoIn: (name: string) => string;
+  anotherProposal: string;
+  keepVersion: (user: string) => string;
+  groupName: Record<string, string>;
+  flagConcurrent: (users: string) => string;
+  flagParallel: (name: string) => string;
+  flagIncoming: string;
+  refreshTitle: (from: string, to: string) => string;
+  incomingTitle: string;
+  incomingNone: string;
+  overlapsTitle: string;
+  currentSide: string;
+  mineSide: string;
+  acceptIncoming: string;
+  keepMine: string;
+  acceptAll: string;
+  keepAll: string;
+  perField: string;
+  movedTitle: string;
+  newIssuesTitle: string;
+  backToDraftNote: string;
+  confirmRefresh: string;
+  deleted: string;
+  kindAdded: string;
+  kindRemoved: string;
+  kindChanged: string;
+  undecidedLeft: (n: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -422,6 +464,47 @@ export const defaultMessages: GanttMessages = {
   apply: 'Apply',
   emptyValue: '(empty)',
   selectedBars: (n) => `${n} selected`,
+  proposals: 'Proposals',
+  colState: 'State',
+  colAge: 'Age',
+  colExpires: 'Expires',
+  colChanges: 'Changes',
+  colShared: 'Shared tasks',
+  ageDays: (n) => `${n} d`,
+  behind: (n) => `Current has changed: ${n} newer ${n === '1' ? 'version' : 'versions'}`,
+  refreshProposal: 'Refresh Proposal',
+  undoRefresh: 'Undo refresh',
+  refreshed: (a, b) => `Refreshed from version ${a} to ${b}`,
+  concurrent: (n) => `Concurrent changes (${n})`,
+  concurrentTitle: 'Concurrent changes',
+  changedAtOnce: (u) => `Changed by ${u} at once`,
+  alsoIn: (n) => `Also changed in ${n}`,
+  anotherProposal: 'another Proposal',
+  keepVersion: (u) => `Keep ${u}’s version`,
+  groupName: { schedule: 'dates', position: 'place in the tree', delete: 'deleted', name: 'name', progress: 'progress', owner: 'owner' },
+  flagConcurrent: (u) => `Changed by ${u} at once: pick a version`,
+  flagParallel: (n) => `Also changed in ${n}`,
+  flagIncoming: 'Changed in Current since this Proposal was made: refresh to decide',
+  refreshTitle: (a, b) => `Refresh from version ${a} to ${b}`,
+  incomingTitle: 'Changes in Current, always taken',
+  incomingNone: 'Nothing else changed.',
+  overlapsTitle: 'Changed on both sides: choose one',
+  currentSide: 'Current',
+  mineSide: 'Your Proposal',
+  acceptIncoming: 'Accept incoming',
+  keepMine: 'Keep mine',
+  acceptAll: 'Accept all incoming',
+  keepAll: 'Keep all mine',
+  perField: 'Choose per field',
+  movedTitle: 'The recalculated schedule moves',
+  newIssuesTitle: 'New scheduling problems',
+  backToDraftNote: 'Confirming moves the Proposal back to Draft: submit it again afterwards.',
+  confirmRefresh: 'Confirm refresh',
+  deleted: 'Deleted',
+  kindAdded: 'added',
+  kindRemoved: 'deleted',
+  kindChanged: 'changed',
+  undecidedLeft: (n) => `${n} still to decide`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
@@ -436,6 +519,7 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     state: { ...defaultMessages.state, ...over.state },
     phaseName: { ...defaultMessages.phaseName, ...over.phaseName },
     action: { ...defaultMessages.action, ...over.action },
+    groupName: { ...defaultMessages.groupName, ...over.groupName },
   };
 }
 

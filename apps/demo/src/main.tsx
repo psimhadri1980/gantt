@@ -133,6 +133,8 @@ function App() {
             onProposalExpiring={(e) => push(`event: proposalExpiring (${e.phase}) at ${e.expiresAt.slice(0, 10)}`)}
             onProposalExpired={(e) => push(`event: proposalExpired (${e.phase})`)}
             onProposalStale={(e) => push(`event: proposalStale ${e.proposal.name}: version ${e.newVersion}`)}
+            onConcurrentChange={(e) => push(`event: concurrentChange in ${e.proposal.name}${e.parallel ? ' (parallel Proposal)' : ''}: ${e.taskIds.join(', ')}`)}
+            onProposalRefreshed={(e) => push(`event: proposalRefreshed ${e.proposal.name}: ${e.fromVersion} → ${e.toVersion}`)}
             onSeparationOfDutiesStatus={(e) => push(`separation of duties ${e.enforced ? 'enforced' : 'NOT enforced'}`)}
             onOperationFailed={(e) => push(`✗ not saved: ${e.reason}`)}
             onOperationRefused={(r) => push(`✗ ${describe(r.operation)}: ${r.reason}`)} />

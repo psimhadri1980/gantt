@@ -1,4 +1,5 @@
 import type { ProposalChange } from '@gantt/contract';
+import type { Pick } from './concurrency.ts';
 
 /** Lifecycle states (plan section 3a). */
 export type ProposalState = 'Draft' | 'Returned' | 'Submitted' | 'Reviewed' | 'Approved' | 'Rejected' | 'Expired' | 'Discarded';
@@ -18,7 +19,7 @@ export function checkLimits(l: ProposalLimits): string | null {
 export interface HistoryEntry {
   at: string;
   by: string;
-  action: 'create' | 'change' | LifecycleAction | 'expire' | 'newFrom';
+  action: 'create' | 'change' | LifecycleAction | 'expire' | 'newFrom' | 'pick' | 'refresh' | 'undoRefresh';
   from?: ProposalState;
   to?: ProposalState;
   reason?: string;
@@ -54,6 +55,10 @@ export interface ProposalRecord {
   derivedFrom?: string;
   /** The version of Current this Proposal produced when approved (K22). */
   approvedVersion?: number;
+  /** Versions picked for tasks two users changed in the same field group (K9). */
+  picks?: Pick[];
+  /** The Proposal as it was before its last refresh, so the refresh can be undone (K17). */
+  beforeRefresh?: { changes: ProposalChange[]; picks?: Pick[]; baseVersion: number; state: ProposalState; phase?: Phase; expiresAt?: string; preparingLeftMs?: number; historyLength: number };
   history: HistoryEntry[];
 }
 
@@ -112,7 +117,8 @@ export function whyNot(p: ProposalRecord, action: LifecycleAction, ctx: Omit<Tra
     if (p.changedBy.includes(ctx.actor)) return 'You changed this Proposal; someone else must review and approve it';
   }
   if (action === 'approve' && p.baseVersion !== ctx.currentVersion) {
-    return `Current has changed since this Proposal was made (version ${p.baseVersion}, now ${ctx.currentVersion}); start a new Proposal from it`;
+    const n = ctx.currentVersion - p.baseVersion;
+    return `Current has changed since this Proposal was made (${n} newer ${n === 1 ? 'version' : 'versions'}: ${p.baseVersion} → ${ctx.currentVersion}); refresh the Proposal first`;
   }
   return null;
 }

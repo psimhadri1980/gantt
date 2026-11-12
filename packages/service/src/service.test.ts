@@ -107,6 +107,8 @@ describe('RoadmapService', () => {
     svc.change('alice', null, [{ entity: 'task', op: 'update', id: 'a', fields: { progress: 0.5 } }]);
     const mine = svc.change('carol', null, [{ entity: 'task', op: 'update', id: 'a', fields: { progress: 0.7 } }]);
     expect(svc.snapshot('carol').proposals.map((p) => p.id)).toEqual([mine.id]);
-    expect(seen.map((e) => e.type === 'proposalCreated' && e.proposal.id)).toEqual([mine.id]);
+    expect(seen.filter((e) => e.type === 'proposalCreated').map((e) => 'proposal' in e && e.proposal.id)).toEqual([mine.id]);
+    // She is warned that another Proposal changes the same task (K7), about her own Proposal only (K8).
+    expect(seen.filter((e) => e.type === 'concurrentChange').every((e) => 'proposal' in e && e.proposal.id === mine.id)).toBe(true);
   });
 });

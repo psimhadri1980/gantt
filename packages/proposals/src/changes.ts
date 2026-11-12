@@ -50,7 +50,7 @@ export function applyChanges(base: RoadmapDocument, changes: ProposalChange[]): 
 /** Field groups for comparison (K7): schedule, position, and each other field on its own. */
 export function fieldGroup(field: string): string {
   if (['start', 'end', 'duration', 'durationUnit', 'constraint'].includes(field)) return 'schedule';
-  if (field === 'parent') return 'position';
+  if (field === 'parent' || field === 'order') return 'position';
   return field;
 }
 
