@@ -367,3 +367,16 @@ polyline.gx-sc-baseline { stroke: var(--gx-muted); stroke-dasharray: 5 3; }
 .gx-root[dir="rtl"] .gx-seg .gx-btn { border-right: 0; border-left: 1px solid var(--gx-border); }
 .gx-root[dir="rtl"] .gx-seg .gx-btn:last-child { border-left: 0; }
 .gx-root[dir="rtl"] .gx-history { padding-left: 0; padding-right: 20px; }
+
+/* Toolbar groups: related controls sit together, separated by thin rules; view tools are pushed to the right. */
+.gx-tb-group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gx-tb-sep { width: 1px; align-self: stretch; margin: 2px 2px; background: var(--gx-border); }
+.gx-tb-spacer { flex: 1 1 0; min-width: 8px; }
+.gx-tb-chips { display: flex; gap: 6px; flex-wrap: wrap; flex-basis: 100%; }
+.gx-caret { margin-inline-start: 6px; font-size: 10px; opacity: .7; }
+.gx-count { display: inline-block; margin-inline-start: 6px; min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; background: var(--gx-sel-strong); color: #fff; }
+.gx-icon-btn { min-width: 32px; font-size: 15px; line-height: 1; }
+.gx-menu-heading { padding: 8px 10px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--gx-muted); }
+.gx-menu-heading:first-child { padding-top: 2px; }
+.gx-check { display: inline-block; width: 1.2em; }
+@media (max-width: 900px) { .gx-tb-sep, .gx-tb-spacer { display: none; } }
