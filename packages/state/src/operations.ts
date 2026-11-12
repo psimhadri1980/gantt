@@ -31,7 +31,7 @@ export const isDataOperation = (op: GanttOperation): op is DataOperation => /^(t
 /** The single operations inside an operation, in order. */
 export const flattenOps = (op: DataOperation): DataOperation[] => (op.type === 'batch' ? op.ops.flatMap(flattenOps) : [op]);
 
-export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo' }
+export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo' | 'redo' }
 
 export type OperationResult =
   | { ok: true; operation: GanttOperation; inverse?: DataOperation[] }

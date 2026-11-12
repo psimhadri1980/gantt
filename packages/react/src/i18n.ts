@@ -145,6 +145,23 @@ export interface GanttMessages {
   drivenBy: string;
   setsDate: string;
   issues: string;
+  // editing (Phase 5)
+  undo: string;
+  redo: string;
+  nothingToUndo: string;
+  nothingToRedo: string;
+  menu: string;
+  editDetails: string;
+  moveEarlier: string;
+  moveLater: string;
+  linkFromHere: string;
+  linkStart: (name: string) => string;
+  linkMade: (from: string, to: string) => string;
+  linkCancelled: string;
+  linkModeHint: string;
+  deleteTask: string;
+  deleteDependency: string;
+  newTask: string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -280,6 +297,22 @@ export const defaultMessages: GanttMessages = {
   drivenBy: 'Start set by',
   setsDate: 'This connector sets the successor’s start',
   issues: 'Schedule issues',
+  undo: 'Undo',
+  redo: 'Redo',
+  nothingToUndo: 'Nothing to undo',
+  nothingToRedo: 'Nothing to redo',
+  menu: 'Actions',
+  editDetails: 'Edit details',
+  moveEarlier: 'Move one day earlier',
+  moveLater: 'Move one day later',
+  linkFromHere: 'Add dependency from here',
+  linkStart: (n) => `Linking from ${n}: move to the successor and press Enter, or Esc to cancel.`,
+  linkMade: (a, b) => `${a} now comes before ${b}.`,
+  linkCancelled: 'Linking cancelled.',
+  linkModeHint: 'Linking: choose the successor and press Enter',
+  deleteTask: 'Delete task',
+  deleteDependency: 'Delete dependency',
+  newTask: 'New task',
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 

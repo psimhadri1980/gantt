@@ -17,7 +17,9 @@ const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/
 
 let failures = 0;
 const results = [];
+const only = process.env.E2E_ONLY ? new RegExp(process.env.E2E_ONLY, 'i') : null;
 async function test(name, fn) {
+  if (only && !only.test(name)) return;
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -240,6 +242,135 @@ await test('critical path highlighting and the Schedule button (C2, K1)', async 
   await page.locator('.gx-toolbar-row [role="status"]', { hasText: /rescheduled|up to date/ }).waitFor();
   await page.locator('[role="row"]', { hasText: 'Hypercare' }).click();
   await page.locator('.gx-details', { hasText: 'Slack' }).waitFor();
+});
+
+// ---------- Phase 5: editing on the chart ----------
+const taskStart = (page, id) => page.evaluate((i) => window.gantt.current.getData().tasks.find((t) => t.id === i)?.start, id);
+async function barBox(page, id) { const b = await page.locator(`.gx-bar[data-task="${id}"]`).boundingBox(); if (!b) throw new Error(`bar ${id} not visible`); return b; }
+const pxPerDay = (page) => page.evaluate(() => { const b = document.querySelector('.gx-bar[data-task="t7"]').getBoundingClientRect(); return b.width / 10; }); // Data model: 8 working days over 10 calendar days
+
+await test('drag a task: successors preview before release, the change applies to all, undo and redo (D1, D17, F8)', async (page) => {
+  await page.getByRole('radio', { name: 'Days' }).click();
+  await page.evaluate(() => window.gantt.current.scrollToTask('t7'));
+  await page.waitForTimeout(500);
+  const px = await pxPerDay(page);
+  const b = await barBox(page, 't7');
+  const s7 = await taskStart(page, 't7'), s8 = await taskStart(page, 't8');
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2 + px * 3.1, b.y + b.height / 2, { steps: 8 });
+  await page.locator('.gx-bar.gx-preview[data-task="t8"]').waitFor({ timeout: 3000 }).catch(() => { throw new Error('the successor API layer is not previewed while dragging'); });
+  const tip = await page.locator('.gx-tooltip').textContent();
+  if (!/working days/.test(tip)) throw new Error(`no live dates in the tooltip: ${tip}`);
+  expectEq(await taskStart(page, 't7'), s7, 'nothing changes before release');
+  await page.mouse.up();
+  await page.waitForFunction((v) => window.gantt.current.getData().tasks.find((t) => t.id === 't7').start !== v, s7, { timeout: 5000 })
+    .catch(async () => { throw new Error(`the drop did not move the task: ${await page.locator('.gx-notice').textContent().catch(() => '')}`); });
+  const n7 = await taskStart(page, 't7'), n8 = await taskStart(page, 't8');
+  if (!(n7 > s7) || !(n8 > s8)) throw new Error(`task and successor did not both move: ${s7}→${n7}, ${s8}→${n8}`);
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction((v) => window.gantt.current.getData().tasks.find((t) => t.id === 't7').start === v, s7, { timeout: 5000 })
+    .catch(async () => { throw new Error(`undo did not restore: ${await taskStart(page, 't7')}`); });
+  expectEq(await taskStart(page, 't8'), s8, 'undo restores the successor too');
+  await page.keyboard.press('Control+y');
+  await page.waitForFunction((v) => window.gantt.current.getData().tasks.find((t) => t.id === 't7').start === v, n7);
+});
+
+await test('Esc cancels a drag, resize changes the duration, progress can be dragged (D17, D6)', async (page) => {
+  await page.getByRole('radio', { name: 'Days' }).click();
+  await page.evaluate(() => window.gantt.current.scrollToTask('t7'));
+  await page.waitForTimeout(500);
+  const px = await pxPerDay(page);
+  let b = await barBox(page, 't7');
+  const s7 = await taskStart(page, 't7');
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2 + px * 4, b.y + b.height / 2, { steps: 5 });
+  await page.keyboard.press('Escape'); await page.mouse.up();
+  await page.waitForTimeout(200);
+  expectEq(await taskStart(page, 't7'), s7, 'Esc cancels');
+  b = await barBox(page, 't7');
+  await page.mouse.move(b.x + b.width - 2, b.y + b.height / 2); await page.mouse.down();
+  await page.mouse.move(b.x + b.width - 2 + px * 2, b.y + b.height / 2, { steps: 5 }); await page.mouse.up();
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').duration === 10);
+  await page.locator('.gx-bar[data-task="t7"]').click();
+  b = await barBox(page, 't7');
+  const hp = await page.locator('.gx-bar[data-task="t7"] .gx-hp').boundingBox();
+  await page.mouse.move(hp.x + hp.width / 2, hp.y + hp.height / 2); await page.mouse.down();
+  await page.mouse.move(b.x + b.width * 0.5, hp.y + hp.height / 2, { steps: 5 }); await page.mouse.up();
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').progress >= 0.4);
+});
+
+await test('draw a dependency on the chart; a cycle is refused with the reason shown (D6, C9)', async (page) => {
+  await page.getByRole('radio', { name: 'Weeks' }).click();
+  await page.evaluate(() => window.gantt.current.scrollToTask('t12'));
+  await page.waitForTimeout(500);
+  const links0 = await page.evaluate(() => window.gantt.current.getData().links.length);
+  const from = page.locator('.gx-bar[data-task="t12"]');
+  await from.hover();
+  const h = await page.locator('.gx-bar[data-task="t12"] .gx-hl-end').boundingBox();
+  const to = await barBox(page, 't14');
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2); await page.mouse.down();
+  await page.mouse.move(to.x + 4, to.y + to.height / 2, { steps: 10 }); await page.mouse.up();
+  await page.waitForFunction((n) => window.gantt.current.getData().links.length === n + 1, links0);
+  const made = await page.evaluate(() => window.gantt.current.getData().links.at(-1));
+  expectEq(`${made.source}-${made.type}-${made.target}`, 't12-FS-t14', 'a finish-to-start link from Indexing to Caching');
+  // Back from Caching to Indexing would close a cycle.
+  await page.locator('.gx-bar[data-task="t14"]').hover();
+  // The details panel may cover the right end, so start from the start handle (a start-to-start link also closes the cycle).
+  const h2 = await page.locator('.gx-bar[data-task="t14"] .gx-hl-start').boundingBox();
+  const back = await barBox(page, 't12');
+  await page.mouse.move(h2.x + h2.width / 2, h2.y + h2.height / 2); await page.mouse.down();
+  await page.mouse.move(back.x + 4, back.y + back.height / 2, { steps: 10 });
+  const tip = await page.locator('.gx-tooltip').textContent();
+  if (!/cycle/i.test(tip)) throw new Error(`no reason while hovering: ${tip}`);
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+  expectEq(await page.evaluate(() => window.gantt.current.getData().links.length), links0 + 1, 'no cyclic link was created');
+});
+
+await test('keyboard only: move a task, link it to another, undo (F9, F3)', async (page) => {
+  await page.locator('[role="row"]', { hasText: 'Auth integration' }).click();
+  const s9 = await taskStart(page, 't9');
+  await page.keyboard.press('Alt+ArrowRight');
+  await page.waitForFunction((v) => window.gantt.current.getData().tasks.find((t) => t.id === 't9').start !== v, s9);
+  await page.keyboard.press('l');
+  await page.locator('.gx-link-mode').waitFor();
+  await page.keyboard.press('ArrowDown'); // Crew Atlas lane
+  await page.keyboard.press('ArrowDown'); // Rollout
+  await page.keyboard.press('ArrowDown'); // Pilot (already a successor of Auth integration)
+  await page.keyboard.press('ArrowDown'); // Training
+  const n0 = await page.evaluate(() => window.gantt.current.getData().links.length);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((n) => window.gantt.current.getData().links.length === n + 1, n0).catch(async () => { throw new Error(`no link: ${await page.locator('.gx-notice').textContent()}`); });
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction((n) => window.gantt.current.getData().links.length === n, n0);
+});
+
+await test('context menu on a bar and a connector; connector type and lag in its details (D8)', async (page) => {
+  await page.evaluate(() => window.gantt.current.scrollToTask('t3'));
+  await page.waitForTimeout(400);
+  const s3 = await taskStart(page, 't3');
+  await page.locator('.gx-bar[data-task="t3"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /Move one day later/ }).click();
+  await page.waitForFunction((v) => window.gantt.current.getData().tasks.find((t) => t.id === 't3').start !== v, s3);
+  await page.locator('[role="row"]', { hasText: 'Requirements' }).click();
+  await page.locator('.gx-details button', { hasText: 'FS' }).first().click();
+  await page.locator('.gx-details select[aria-label="Type"]').selectOption('SS');
+  await page.waitForFunction(() => window.gantt.current.getData().links.find((l) => l.id === 'l1').type === 'SS');
+  await page.locator('.gx-details input[aria-label="Lag"]').fill('2');
+  await page.locator('.gx-details input[aria-label="Lag"]').press('Enter');
+  await page.waitForFunction(() => window.gantt.current.getData().links.find((l) => l.id === 'l1').lag === 2);
+});
+
+await test('touch: a long press on a bar opens the menu (F10)', async (page) => {
+  await page.evaluate(() => window.gantt.current.scrollToTask('t3'));
+  await page.waitForTimeout(400);
+  const b = await barBox(page, 't3');
+  await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, button: 0, isPrimary: true }));
+  }, { x: b.x + b.width / 2, y: b.y + b.height / 2 });
+  await page.getByRole('menu').waitFor({ timeout: 2000 });
 });
 
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------

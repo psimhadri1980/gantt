@@ -38,13 +38,16 @@ interface Props {
   compare?: { base: RoadmapDocument; placement: Placement };
   /** The engine's schedule analysis (C2): slack, critical, driving links, issues. */
   analysis?: ScheduleResult | null;
+  /** Editing a connector's type and lag; null when allowed, else the reason. */
+  whyNotLinkEdit?: () => string | null;
+  editLink?: (id: string, fields: Partial<Link>) => unknown;
 }
 
 const fmt = (d: DayNum | undefined, locale?: string) =>
   d === undefined ? '—' : formatDay(d, locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const readOnly = () => false; // Phase 1: the panel is read-only.
 
-export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis }: Props) {
+export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis, whyNotLinkEdit, editLink }: Props) {
   const { t: m } = i18n;
   const primary = selection[selection.length - 1];
   let body: ReactNode;
@@ -54,7 +57,7 @@ export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds
     const l = model.doc.links.find((x) => x.id === primary.linkId);
     if (!l) body = <p className="gx-muted">{m.noLongerExists}</p>;
     else {
-      const Default = () => <LinkDetails link={l} model={model} select={select} kinds={kinds} analysis={analysis} />;
+      const Default = () => <LinkDetails link={l} model={model} select={select} kinds={kinds} analysis={analysis} why={whyNotLinkEdit ? whyNotLinkEdit() : 'read-only'} edit={editLink} />;
       const Custom = l.kind ? kinds?.links?.[l.kind]?.details : undefined;
       body = Custom ? <Custom item={l} model={model} select={select} canEdit={readOnly} Default={Default} /> : <Default />;
     }
@@ -190,7 +193,7 @@ function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare,
   );
 }
 
-function LinkDetails({ link: l, model, select, kinds, analysis }: { link: Link; model: Model; select: Props['select']; kinds?: GanttKinds; analysis?: Props['analysis'] }) {
+function LinkDetails({ link: l, model, select, kinds, analysis, why, edit }: { link: Link; model: Model; select: Props['select']; kinds?: GanttKinds; analysis?: Props['analysis']; why: string | null; edit?: Props['editLink'] }) {
   const { t: m, num } = useI18n();
   const a = model.placement.byId.get(l.source), b = model.placement.byId.get(l.target);
   const src = model.tasks.get(l.source)?.name ?? l.source, tgt = model.tasks.get(l.target)?.name ?? l.target;
@@ -213,8 +216,14 @@ function LinkDetails({ link: l, model, select, kinds, analysis }: { link: Link; 
       <section><dl>
         <Field label={m.from}><TaskRef id={l.source} model={model} select={select} /></Field>
         <Field label={m.to}><TaskRef id={l.target} model={model} select={select} /></Field>
-        <Field label={m.type}>{m.linkType[l.type]}</Field>
-        <Field label={m.lag}>{l.lag ? m.lagValue(num(l.lag), l.lagUnit ?? 'day') : m.none}</Field>
+        <Field label={m.type}>{why === null && edit
+          ? <select className="gx-select" aria-label={m.type} value={l.type} onChange={(e) => edit(l.id, { type: e.target.value as Link['type'] })}>
+              {(['FS', 'SS', 'FF', 'SF'] as const).map((ty) => <option key={ty} value={ty}>{m.linkType[ty]}</option>)}
+            </select>
+          : <span title={why && why !== 'read-only' ? why : undefined}>{m.linkType[l.type]}</span>}</Field>
+        <Field label={m.lag}>{why === null && edit
+          ? <LagInput value={l.lag ?? 0} label={m.lag} onCommit={(v) => edit(l.id, { lag: v })} />
+          : <span title={why && why !== 'read-only' ? why : undefined}>{l.lag ? m.lagValue(num(l.lag), l.lagUnit ?? 'day') : m.none}</span>}</Field>
       </dl></section>
     </div>
   );
@@ -260,3 +269,10 @@ function RoadmapSummary({ model, analysis, select }: { model: Model; analysis?: 
 }
 
 const dayOf = (iso: string) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86_400_000);
+
+function LagInput({ value, label, onCommit }: { value: number; label: string; onCommit: (v: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => { const v = Math.round(Number(draft)); if (Number.isFinite(v) && v !== value) onCommit(v); };
+  return <input className="gx-input" type="number" step={1} aria-label={label} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); }} />;
+}

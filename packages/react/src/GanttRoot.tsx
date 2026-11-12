@@ -200,7 +200,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   const empty: RoadmapDocument = { contract: 'gantt-roadmap/1', roadmap: { id: 'none', name: '', version: 0, timeZone: 'UTC', start: new Date().toISOString().slice(0, 10) }, tasks: [], links: [] };
   return (
     <CoreGantt {...props} ref={props.forwardedRef} data={shown ?? empty} evaluator={props.evaluator} header={header}
-      readOnly={readOnly} saveState={save} onCommit={onCommit}
+      readOnly={readOnly} saveState={save} onCommit={onCommit} undoScope={viewKey}
       compareWith={compare && view.kind === 'proposal' && snap.current ? snap.current : undefined}
       emptyState={<>{header}<div className="gx-empty">{view.kind === 'current' && !snap.current ? m.currentNone : shown ? m.empty : m.loading}</div></>} />
   );

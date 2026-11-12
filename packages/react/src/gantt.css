@@ -181,3 +181,40 @@
 .gx-bar.gx-critical.gx-task { background: var(--gx-critical); }
 .gx-bar.gx-critical .gx-diamond { background: var(--gx-critical); }
 .gx-link.gx-critical .gx-link-line { stroke: var(--gx-critical); stroke-width: 2; }
+
+/* Editing on the chart (Phase 5) */
+.gx-h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 2; }
+.gx-h-start { left: -3px; } .gx-h-end { right: -3px; }
+.gx-hp { position: absolute; bottom: -5px; width: 10px; height: 8px; margin-left: -5px; cursor: col-resize; z-index: 2; opacity: 0;
+  background: var(--gx-text); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.gx-hl { position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--gx-bg);
+  border: 2px solid var(--gx-sel-strong); cursor: crosshair; z-index: 3; opacity: 0; }
+.gx-hl-start { left: -13px; } .gx-hl-end { right: -13px; }
+.gx-bar:hover .gx-hl, .gx-bar.gx-sel .gx-hl, .gx-bar:hover .gx-hp, .gx-bar.gx-sel .gx-hp { opacity: 1; }
+.gx-bar.gx-milestone .gx-hl-start { left: -14px; } .gx-bar.gx-milestone .gx-hl-end { right: -14px; }
+@media (pointer: coarse) { /* fingers (F10) */
+  .gx-h { width: 18px; } .gx-h-start { left: -9px; } .gx-h-end { right: -9px; }
+  .gx-hl { width: 18px; height: 18px; margin-top: -9px; } .gx-hl-start { left: -22px; } .gx-hl-end { right: -22px; }
+  .gx-hp { width: 18px; height: 14px; margin-left: -9px; bottom: -10px; }
+}
+.gx-canvas.gx-dragging { cursor: grabbing; }
+.gx-canvas.gx-dragging .gx-links { opacity: .35; }
+.gx-bar.gx-drag-src { z-index: 4; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.gx-bar.gx-drag-lane { outline: 2px dashed var(--gx-sel-strong); }
+.gx-bar.gx-preview { outline: 2px dashed var(--gx-diff); outline-offset: 1px; opacity: .85; }
+.gx-bar.gx-link-target { box-shadow: 0 0 0 3px var(--gx-sel-strong); }
+.gx-bar.gx-link-bad { box-shadow: 0 0 0 3px var(--gx-warn); }
+.gx-drag-layer { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 5; }
+.gx-drag-line { stroke: var(--gx-sel-strong); stroke-width: 2; stroke-dasharray: 4 3; }
+.gx-create-ghost { position: absolute; height: 20px; border: 2px dashed var(--gx-sel-strong); border-radius: var(--gx-radius); background: var(--gx-sel); z-index: 4; pointer-events: none; }
+.gx-rowbg.gx-lane { cursor: crosshair; }
+.gx-bar.gx-task { cursor: grab; }
+.gx-notice { max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-link-mode { background: var(--gx-sel); color: var(--gx-sel-strong); }
+.gx-menu { position: fixed; z-index: 2000; min-width: 220px; background: var(--gx-bg); color: var(--gx-text); border: 1px solid var(--gx-border);
+  border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22); padding: 4px; display: grid; font: var(--gx-font-size)/1.35 var(--gx-font); }
+.gx-menu-item { display: flex; justify-content: space-between; gap: 16px; text-align: left; background: none; border: 0; padding: 6px 10px; border-radius: 5px; cursor: pointer; color: inherit; font: inherit; min-height: 30px; align-items: center; }
+.gx-menu-item:hover, .gx-menu-item:focus-visible { background: var(--gx-sel); outline: none; }
+.gx-menu-item[aria-disabled='true'] { opacity: .5; cursor: not-allowed; }
+.gx-menu-item kbd { font: 11px ui-monospace, monospace; color: var(--gx-muted); }
+.gx-menu-sep { height: 1px; background: var(--gx-border); margin: 4px 2px; }
