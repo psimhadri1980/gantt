@@ -12,10 +12,14 @@ it('filters 10,000 tasks with task-level and field-level rules quickly', () => {
   ];
   const ev = new AccessEvaluator({ subject: { id: 'x' }, rules });
   filterDocument(doc, ev); // warm up
-  const t = performance.now();
-  const f = filterDocument(doc, new AccessEvaluator({ subject: { id: 'x' }, rules }));
-  const ms = performance.now() - t;
+  // Best of three, so other test files running in parallel do not make it flaky.
+  let ms = Infinity, f = doc;
+  for (let i = 0; i < 3; i++) {
+    const t = performance.now();
+    f = filterDocument(doc, new AccessEvaluator({ subject: { id: 'x' }, rules }));
+    ms = Math.min(ms, performance.now() - t);
+  }
   expect(f.tasks.length).toBeLessThan(doc.tasks.length);
-  expect(f.tasks.every((x) => !('kind' in x) || true)).toBe(true);
+  expect(f.tasks.every((x) => !('owner' in x))).toBe(true);
   expect(ms).toBeLessThan(60);
 });

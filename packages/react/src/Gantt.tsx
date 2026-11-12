@@ -328,7 +328,17 @@ function GanttView(props: CoreProps & {
   const rootRef = useRef<HTMLDivElement>(null);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState({ b0: 0, b1: 1, c0: 0, c1: 1, h: 600 });
+  // b0..b1 and c0..c1 include the overscan margin; v0..v1 and t0..t1 are what is actually on screen.
+  const [view, setView] = useState({ b0: 0, b1: 1, c0: 0, c1: 1, v0: 0, v1: 1, t0: 0, t1: 1, h: 600 });
+  // Right after a zoom only what is on screen is redrawn; the margin follows in a later task, so the
+  // redraw never becomes one long task (budget: no task over 100 ms).
+  const [settling, setSettling] = useState(false);
+  useEffect(() => {
+    if (!settling) return;
+    let t = 0;
+    const raf = requestAnimationFrame(() => { t = window.setTimeout(() => startTransition(() => setSettling(false)), 0); });
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [settling]);
   const geom = useRef({ rows, scale, blocksLen: blocks.length, zoom, levels }); geom.current = { rows, scale, blocksLen: blocks.length, zoom, levels };
   // Viewport size comes from the ResizeObserver, so the scroll handler only reads scroll offsets and never forces layout.
   const size = useRef({ w: 1000, h: 600 });
@@ -339,9 +349,12 @@ function GanttView(props: CoreProps & {
     const { rows: rs, scale: sc, blocksLen } = geom.current;
     const r0 = rowAt(rs, st - OVERSCAN_PX), r1 = rowAt(rs, st + h + OVERSCAN_PX);
     const b0 = Math.floor(r0 / BLOCK), b1 = Math.min(blocksLen, Math.floor(r1 / BLOCK) + 1);
+    const v0 = Math.floor(rowAt(rs, st) / BLOCK), v1 = Math.min(blocksLen, Math.floor(rowAt(rs, st + h) / BLOCK) + 1);
+    const t0 = Math.floor(Math.max(0, sl / sc.pxPerDay) / DAY_CHUNK), t1 = Math.floor((sl + w) / sc.pxPerDay / DAY_CHUNK) + 1;
     const d0 = (sl - OVERSCAN_PX) / sc.pxPerDay, d1 = (sl + w + OVERSCAN_PX) / sc.pxPerDay;
     const c0 = Math.floor(Math.max(0, d0) / DAY_CHUNK), c1 = Math.floor(d1 / DAY_CHUNK) + 1;
-    startTransition(() => setView((v) => (v.b0 === b0 && v.b1 === b1 && v.c0 === c0 && v.c1 === c1 && v.h === h ? v : { b0, b1, c0, c1, h })));
+    startTransition(() => setView((v) => (v.b0 === b0 && v.b1 === b1 && v.c0 === c0 && v.c1 === c1 && v.v0 === v0 && v.v1 === v1 && v.t0 === t0 && v.t1 === t1 && v.h === h
+      ? v : { b0, b1, c0, c1, v0, v1, t0, t1, h })));
   }, []);
   const onScroll = useCallback(() => {
     const el = chartRef.current!;
@@ -373,7 +386,7 @@ function GanttView(props: CoreProps & {
   const pendingAnchor = useRef<{ day: number; px: number } | null>(null);
   const gesture = useRef<{ from: number; px: number; timer: number } | null>(null);
   const gesture_active = () => gesture.current !== null;
-  const applyZoom = useCallback((z: string) => { startTransition(() => setZoomState(z)); onZoomRef.current?.(z); }, []);
+  const applyZoom = useCallback((z: string) => { startTransition(() => { setZoomState(z); setSettling(true); }); onZoomRef.current?.(z); }, []);
   const setZoom = useCallback((z: string, anchorPx?: number) => {
     const el = chartRef.current, sc = geom.current.scale;
     if (el && !pendingAnchor.current) {
@@ -602,7 +615,15 @@ function GanttView(props: CoreProps & {
   const Toolbar = props.toolbar === false ? null : props.toolbar ?? DefaultToolbar;
   const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
   const visibleBlocks = blocks.slice(view.b0, view.b1);
-  const dayFrom = origin + view.c0 * DAY_CHUNK, dayTo = origin + view.c1 * DAY_CHUNK;
+  // The chart side (bars, links, ticks) shows only the on-screen part while settling after a zoom.
+  const chartBlocks = settling ? blocks.slice(view.v0, view.v1) : visibleBlocks;
+  // The drawn window. Full-height layers (links, gridlines, shading, markers) are sized to it, not to the
+  // whole canvas: with 10,000 rows the canvas is hundreds of thousands of pixels tall, and a layer that
+  // size makes every zoom an expensive relayout and repaint.
+  const firstRow = chartBlocks[0]?.rows[0];
+  const lastBlock = chartBlocks[chartBlocks.length - 1];
+  const win = { y: firstRow?.top ?? 0, h: lastBlock ? totalHeight(lastBlock.rows) - (firstRow?.top ?? 0) : 0 };
+  const dayFrom = origin + (settling ? view.t0 : view.c0) * DAY_CHUNK, dayTo = origin + (settling ? view.t1 : view.c1) * DAY_CHUNK;
   const markers = useMemo(() => [{ day: todayDay, label: m.todayMarker, today: true }, ...(props.markers ?? []).map((m) => ({ day: dayOfIso(m.date), label: m.label, today: false }))], [todayDay, props.markers, m]);
   const H = totalHeight(rows);
   // Links are bucketed by the block of their upper end; links spanning more than two blocks are drawn separately.
@@ -617,7 +638,8 @@ function GanttView(props: CoreProps & {
     }
     return { byBlock, long };
   }, [blocks, data.links, bars, rowIndexOf]);
-  const longVisible = useMemo(() => linkBuckets.long.filter((x) => x.b1 >= view.b0 && x.b0 < view.b1).map((x) => x.l), [linkBuckets, view.b0, view.b1]);
+  const lb0 = settling ? view.v0 : view.b0, lb1 = settling ? view.v1 : view.b1;
+  const longVisible = useMemo(() => linkBuckets.long.filter((x) => x.b1 >= lb0 && x.b0 < lb1).map((x) => x.l), [linkBuckets, lb0, lb1]);
 
   if (data.tasks.length === 0) {
     return <div className="gx-root" {...themeAttr} style={{ height }}>{props.emptyState ?? <div className="gx-empty">{m.empty}</div>}</div>;
@@ -677,20 +699,25 @@ function GanttView(props: CoreProps & {
               onPointerUp={() => { const p = pan.current; pan.current = null; if (p && !p.moved) select([]); }}
               onPointerLeave={() => { pan.current = null; }}>
               <div className="gx-canvas" ref={canvasRef} style={{ width: chartWidth, height: H }}>
-                <BackgroundLayer scale={scale} minor={level.minor} from={dayFrom} to={dayTo} model={model} shade={props.highlightNonWorking !== false} />
-                {visibleBlocks.map((b) => <RowBgBlock key={'bg' + b.index} block={b} selKeys={selKeys} />)}
-                <svg className="gx-links" width={chartWidth} height={H} aria-hidden>
+                <div className="gx-window" style={{ top: win.y, height: win.h }}>
+                  <BackgroundLayer scale={scale} minor={level.minor} from={dayFrom} to={dayTo} model={model} shade={props.highlightNonWorking !== false} />
+                  {markers.map((m) => <div key={m.label + m.day} className={`gx-marker${m.today ? ' gx-today' : ''}`} style={{ left: xOf(scale, m.day) }}><span>{m.label}</span></div>)}
+                </div>
+                {chartBlocks.map((b) => <RowBgBlock key={'bg' + b.index} block={b} selKeys={selKeys} />)}
+                <svg className="gx-links" aria-hidden
+                  style={{ left: Math.max(0, xOf(scale, dayFrom)), top: win.y }}
+                  width={Math.max(1, Math.min(chartWidth, xOf(scale, dayTo)) - Math.max(0, xOf(scale, dayFrom)))} height={Math.max(1, win.h)}
+                  viewBox={`${Math.max(0, xOf(scale, dayFrom))} ${win.y} ${Math.max(1, Math.min(chartWidth, xOf(scale, dayTo)) - Math.max(0, xOf(scale, dayFrom)))} ${Math.max(1, win.h)}`}>
                   <defs>
                     <marker id="gx-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                       <path d="M0,0 L8,4 L0,8 z" className="gx-arrowhead" />
                     </marker>
                   </defs>
-                  {visibleBlocks.map((b) => <LinkGroup key={'l' + b.index} links={linkBuckets.byBlock[b.index]} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} />)}
+                  {chartBlocks.map((b) => <LinkGroup key={'l' + b.index} links={linkBuckets.byBlock[b.index]} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} />)}
                   <LinkGroup links={longVisible} model={model} bars={bars} scale={scale} selKeys={selKeys} api={api} />
                 </svg>
-                {visibleBlocks.map((b) => <BarBlock key={'b' + b.index} block={b} ctx={ctx} api={api} scale={scale} bars={bars}
+                {chartBlocks.map((b) => <BarBlock key={'b' + b.index} block={b} ctx={ctx} api={api} scale={scale} bars={bars}
                   focus={focus.row >= b.start && focus.row < b.start + BLOCK ? focus : null} />)}
-                {markers.map((m) => <div key={m.label + m.day} className={`gx-marker${m.today ? ' gx-today' : ''}`} style={{ left: xOf(scale, m.day) }}><span>{m.label}</span></div>)}
               </div>
             </div>
           </div>

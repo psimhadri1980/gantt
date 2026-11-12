@@ -74,6 +74,9 @@
 /* Ticks must not clip their overflow: a clipping box would become the sticky label's scroll container and the label would scroll away with the period start. */
 .gx-major { top: 0; font-weight: 600; color: var(--gx-text); }
 .gx-minor { top: 50%; }
+/* Only the top row sticks to the left edge: there are few of them. Bottom-row labels always fit their cell,
+   and making hundreds of them sticky turns each into a compositing candidate, which made zooming slow. */
+.gx-minor span { position: static; }
 .gx-chart:focus-visible { outline: 2px solid var(--gx-sel-strong); outline-offset: -2px; }
 .gx-chart { flex: 1; overflow: auto; position: relative; cursor: grab; overscroll-behavior: contain; }
 .gx-canvas { position: relative; }
@@ -85,7 +88,8 @@
 .gx-rowbg.gx-sel { background: color-mix(in srgb, var(--gx-sel) 70%, transparent); }
 .gx-rowbg.gx-lane { background: color-mix(in srgb, var(--gx-surface) 60%, transparent); }
 
-.gx-links { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.gx-links { position: absolute; left: 0; top: 0; pointer-events: none; overflow: hidden; }
+.gx-window { position: absolute; left: 0; right: 0; pointer-events: none; }
 .gx-link-line { fill: none; stroke: var(--gx-link); stroke-width: 1.4; }
 .gx-arrowhead { fill: var(--gx-link); }
 .gx-link-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
