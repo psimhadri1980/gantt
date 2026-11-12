@@ -6,26 +6,6 @@ Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand
 
 37 exports.
 
-## applySchedule
-
-*function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
-
-Applies a schedule's changes to a document (K1): new starts; a stored end is dropped so it cannot disagree.
-
-```ts
-export function applySchedule(doc: RoadmapDocument, r: ScheduleResult): RoadmapDocument
-```
-
-## buildCalendars
-
-*function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
-
-Builds a `WorkCalendar` for each calendar in the document, keyed by id.
-
-```ts
-export function buildCalendars(cals: Calendar[] | undefined): Map<string, WorkCalendar>
-```
-
 ## CompactPlacement
 
 *interface* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
@@ -45,6 +25,14 @@ export interface CompactPlacement {
 }
 ```
 
+## DEFAULT_CALENDAR
+
+*const* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+```ts
+const DEFAULT_CALENDAR: Calendar
+```
+
 ## DayNum
 
 *type* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
@@ -55,44 +43,6 @@ of the browser's time zone; the contract defines dates in the roadmap's time zon
 
 ```ts
 export type DayNum = number;
-```
-
-## DEFAULT_CALENDAR
-
-*const* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
-
-```ts
-const DEFAULT_CALENDAR: Calendar
-```
-
-## expandPlacement
-
-*function* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
-
-Rebuilds a full Placement from the compact form against the same document.
-
-```ts
-export function expandPlacement(doc: RoadmapDocument, c: CompactPlacement): Placement
-```
-
-## fixesFor
-
-*function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
-
-Explained fixes for an issue (C5): move, remove the cause, or switch to automatic scheduling.
-
-```ts
-export function fixesFor(doc: RoadmapDocument, issue: ScheduleIssue): IssueFix[]
-```
-
-## fromDay
-
-*function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
-
-Converts a day number back to an ISO date string.
-
-```ts
-export function fromDay(d: DayNum): IsoDate
 ```
 
 ## IssueFix
@@ -106,19 +56,6 @@ export interface IssueFix {
   label: string;
   ops: ({ type: 'task.update'; id: string; fields: Record<string, unknown> } | { type: 'link.delete'; id: string })[];
 }
-```
-
-## levelResources
-
-*function* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
-
-Resource levelling (E6): tasks with assignments are delayed, in order of their start, until every
-assigned resource has capacity on each of their days; dependencies are then re-applied, and this repeats
-until nothing moves. Returns the changes (a new start and a start-no-earlier-than constraint) and the
-tasks that could not be fitted within a year.
-
-```ts
-export function levelResources(doc: RoadmapDocument): { changes: { id: string; fields: Partial<Task> }[]; unresolved: string[] }
 ```
 
 ## LoadBucket
@@ -169,37 +106,6 @@ export interface LoadRow {
 }
 ```
 
-## periods
-
-*function* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
-
-Period boundaries covering [from, to].
-
-```ts
-export function periods(from: DayNum, to: DayNum, period: LoadPeriod): [DayNum, DayNum][]
-```
-
-## place
-
-*function* · [packages/engine/src/schedule.ts](../../packages/engine/src/schedule.ts)
-
-Places each task from its start and duration in working time, and derives summary dates and
-progress from the children (C7, C12). Phase 1 does not schedule from links; that is Phase 4.
-
-```ts
-export function place(doc: RoadmapDocument): Placement
-```
-
-## placeCompact
-
-*function* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
-
-Places the roadmap and packs the result into typed arrays, so the worker can transfer it without copying.
-
-```ts
-export function placeCompact(doc: RoadmapDocument): CompactPlacement
-```
-
 ## PlacedTask
 
 *interface* · [packages/engine/src/schedule.ts](../../packages/engine/src/schedule.ts)
@@ -238,17 +144,6 @@ export interface Placement {
 }
 ```
 
-## progressLine
-
-*function* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
-
-Progress line (B3) on a status date: for every task that has started or should have, the line passes
-through its progress; tasks neither started nor due keep the line on the status date.
-
-```ts
-export function progressLine(placement: Placement, statusDay: DayNum, tolerance = 0.5): Map<string, ProgressPoint>
-```
-
 ## ProgressPoint
 
 *interface* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
@@ -268,18 +163,6 @@ export interface ProgressPoint {
 }
 ```
 
-## resourceLoad
-
-*function* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
-
-Load per resource and period (E3, E4, E5). With assignments: one row per resource (capacity from its
-capacityFte on its own calendar) plus "Unassigned" for tasks without any. Without: default demand of
-1 FTE per task working day, as a total and per owner, measured against the roadmap's default capacity (E7).
-
-```ts
-export function resourceLoad(doc: RoadmapDocument, placement: Placement, opts: { period: LoadPeriod; from?: DayNum; to?: DayNum }): ResourceLoad
-```
-
 ## ResourceLoad
 
 *interface* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
@@ -294,16 +177,24 @@ export interface ResourceLoad {
 }
 ```
 
-## schedule
+## SCurve
 
-*function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
+*interface* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
 
-Computes the schedule of a whole roadmap (C1–C8): every task's earliest start and finish from its own date,
-its constraint, its predecessors (with lag, on each task's calendar) and its parent's dates. Summaries span their
-children. Tasks in a cycle are reported and left at their stored dates. Pure: the document is not changed.
+Planned versus actual cumulative work over time, for the S-curve chart.
 
 ```ts
-export function schedule(doc: RoadmapDocument): ScheduleResult
+export interface SCurve {
+  /** One entry per calendar day from the first start to the last finish. */
+  days: DayNum[];
+  /** Cumulative planned work (working days). */
+  planned: number[];
+  /** Cumulative work done, up to the status date (null after it). */
+  actual: (number | null)[];
+  /** Cumulative work in the baseline, when one is given. */
+  baseline: number[] | null;
+  totals: { planned: number; actual: number; baseline: number | null };
+}
 ```
 
 ## ScheduleIssue
@@ -345,59 +236,6 @@ export interface ScheduleResult {
   cycle?: string[];
   end?: DayNum;
 }
-```
-
-## sCurve
-
-*function* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
-
-S-curve (B2). The planned curve spreads each leaf task's work over its working days; the actual curve
-reaches each task's earned work (work × progress) on the status date, following the plan's shape before
-it; the baseline curve does the same for the saved plan. Totals equal the sums over the data.
-
-```ts
-export function sCurve(placement: Placement, statusDay: DayNum, baseline?: Baseline): SCurve
-```
-
-## SCurve
-
-*interface* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
-
-Planned versus actual cumulative work over time, for the S-curve chart.
-
-```ts
-export interface SCurve {
-  /** One entry per calendar day from the first start to the last finish. */
-  days: DayNum[];
-  /** Cumulative planned work (working days). */
-  planned: number[];
-  /** Cumulative work done, up to the status date (null after it). */
-  actual: (number | null)[];
-  /** Cumulative work in the baseline, when one is given. */
-  baseline: number[] | null;
-  totals: { planned: number; actual: number; baseline: number | null };
-}
-```
-
-## spanOf
-
-*function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
-
-Places `work` working days starting at `start` (moved forward to the first working day), honouring planned
-interruptions (`splits`: after N working days, pause for `gap` working days). See `TaskSpan` for the result.
-
-```ts
-export function spanOf(cal: WorkCalendar, start: DayNum, work: number, splits?: { after: number; gap: number }[]): TaskSpan
-```
-
-## takeBaseline
-
-*function* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
-
-Snapshot of the plan (B1): each scheduled task's dates and work. Saving one does not change the plan.
-
-```ts
-export function takeBaseline(placement: Placement, meta: Omit<Baseline, 'tasks'>): Baseline
 ```
 
 ## TaskSchedule
@@ -445,6 +283,190 @@ be fractional for hour-based tasks.
 export interface TaskSpan { start: DayNum; end: DayNum; segments: [DayNum, DayNum][]; endFraction: number; occupied: number }
 ```
 
+## WorkCalendar
+
+*class* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Working time of one calendar (C3, G4): which weekdays are worked and which dates are holidays. Every date
+computation in the engine goes through it, so a task on a 4-day calendar is placed in its own working time.
+
+```ts
+export class WorkCalendar {
+  readonly id: string;
+  constructor(cal: Calendar = DEFAULT_CALENDAR)
+  isHoliday(d: DayNum): boolean
+  holidaysBetween(from: DayNum, to: DayNum): DayNum[]
+  isWorking(d: DayNum): boolean
+  nextWorking(d: DayNum): DayNum
+  prevWorking(d: DayNum): DayNum
+  endOf(start: DayNum, duration: number): DayNum
+  shift(d: DayNum, n: number): DayNum
+  workingDaysBetween(start: DayNum, end: DayNum): number
+}
+```
+
+## applySchedule
+
+*function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
+
+Applies a schedule's changes to a document (K1): new starts; a stored end is dropped so it cannot disagree.
+
+```ts
+export function applySchedule(doc: RoadmapDocument, r: ScheduleResult): RoadmapDocument
+```
+
+## buildCalendars
+
+*function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Builds a `WorkCalendar` for each calendar in the document, keyed by id.
+
+```ts
+export function buildCalendars(cals: Calendar[] | undefined): Map<string, WorkCalendar>
+```
+
+## expandPlacement
+
+*function* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
+
+Rebuilds a full Placement from the compact form against the same document.
+
+```ts
+export function expandPlacement(doc: RoadmapDocument, c: CompactPlacement): Placement
+```
+
+## fixesFor
+
+*function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
+
+Explained fixes for an issue (C5): move, remove the cause, or switch to automatic scheduling.
+
+```ts
+export function fixesFor(doc: RoadmapDocument, issue: ScheduleIssue): IssueFix[]
+```
+
+## fromDay
+
+*function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Converts a day number back to an ISO date string.
+
+```ts
+export function fromDay(d: DayNum): IsoDate
+```
+
+## levelResources
+
+*function* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
+
+Resource levelling (E6): tasks with assignments are delayed, in order of their start, until every
+assigned resource has capacity on each of their days; dependencies are then re-applied, and this repeats
+until nothing moves. Returns the changes (a new start and a start-no-earlier-than constraint) and the
+tasks that could not be fitted within a year.
+
+```ts
+export function levelResources(doc: RoadmapDocument): { changes: { id: string; fields: Partial<Task> }[]; unresolved: string[] }
+```
+
+## periods
+
+*function* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
+
+Period boundaries covering [from, to].
+
+```ts
+export function periods(from: DayNum, to: DayNum, period: LoadPeriod): [DayNum, DayNum][]
+```
+
+## place
+
+*function* · [packages/engine/src/schedule.ts](../../packages/engine/src/schedule.ts)
+
+Places each task from its start and duration in working time, and derives summary dates and
+progress from the children (C7, C12). Phase 1 does not schedule from links; that is Phase 4.
+
+```ts
+export function place(doc: RoadmapDocument): Placement
+```
+
+## placeCompact
+
+*function* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
+
+Places the roadmap and packs the result into typed arrays, so the worker can transfer it without copying.
+
+```ts
+export function placeCompact(doc: RoadmapDocument): CompactPlacement
+```
+
+## progressLine
+
+*function* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
+
+Progress line (B3) on a status date: for every task that has started or should have, the line passes
+through its progress; tasks neither started nor due keep the line on the status date.
+
+```ts
+export function progressLine(placement: Placement, statusDay: DayNum, tolerance = 0.5): Map<string, ProgressPoint>
+```
+
+## resourceLoad
+
+*function* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
+
+Load per resource and period (E3, E4, E5). With assignments: one row per resource (capacity from its
+capacityFte on its own calendar) plus "Unassigned" for tasks without any. Without: default demand of
+1 FTE per task working day, as a total and per owner, measured against the roadmap's default capacity (E7).
+
+```ts
+export function resourceLoad(doc: RoadmapDocument, placement: Placement, opts: { period: LoadPeriod; from?: DayNum; to?: DayNum }): ResourceLoad
+```
+
+## sCurve
+
+*function* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
+
+S-curve (B2). The planned curve spreads each leaf task's work over its working days; the actual curve
+reaches each task's earned work (work × progress) on the status date, following the plan's shape before
+it; the baseline curve does the same for the saved plan. Totals equal the sums over the data.
+
+```ts
+export function sCurve(placement: Placement, statusDay: DayNum, baseline?: Baseline): SCurve
+```
+
+## schedule
+
+*function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
+
+Computes the schedule of a whole roadmap (C1–C8): every task's earliest start and finish from its own date,
+its constraint, its predecessors (with lag, on each task's calendar) and its parent's dates. Summaries span their
+children. Tasks in a cycle are reported and left at their stored dates. Pure: the document is not changed.
+
+```ts
+export function schedule(doc: RoadmapDocument): ScheduleResult
+```
+
+## spanOf
+
+*function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Places `work` working days starting at `start` (moved forward to the first working day), honouring planned
+interruptions (`splits`: after N working days, pause for `gap` working days). See `TaskSpan` for the result.
+
+```ts
+export function spanOf(cal: WorkCalendar, start: DayNum, work: number, splits?: { after: number; gap: number }[]): TaskSpan
+```
+
+## takeBaseline
+
+*function* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
+
+Snapshot of the plan (B1): each scheduled task's dates and work. Saving one does not change the plan.
+
+```ts
+export function takeBaseline(placement: Placement, meta: Omit<Baseline, 'tasks'>): Baseline
+```
+
 ## toDay
 
 *function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
@@ -484,28 +506,6 @@ summary and its own descendant, not twice, and not if it would close a cycle. Re
 
 ```ts
 export function whyNotLink(doc: RoadmapDocument, source: string, target: string, type: Kind = 'FS'): string | null
-```
-
-## WorkCalendar
-
-*class* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
-
-Working time of one calendar (C3, G4): which weekdays are worked and which dates are holidays. Every date
-computation in the engine goes through it, so a task on a 4-day calendar is placed in its own working time.
-
-```ts
-export class WorkCalendar {
-  readonly id: string;
-  constructor(cal: Calendar = DEFAULT_CALENDAR)
-  isHoliday(d: DayNum): boolean
-  holidaysBetween(from: DayNum, to: DayNum): DayNum[]
-  isWorking(d: DayNum): boolean
-  nextWorking(d: DayNum): DayNum
-  prevWorking(d: DayNum): DayNum
-  endOf(start: DayNum, duration: number): DayNum
-  shift(d: DayNum, n: number): DayNum
-  workingDaysBetween(start: DayNum, end: DayNum): number
-}
 ```
 
 ## workDays

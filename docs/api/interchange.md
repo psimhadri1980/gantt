@@ -6,6 +6,17 @@ Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand
 
 21 exports.
 
+## COLUMNS
+
+*const* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
+
+The task table shared by CSV and Excel (I1, I3): one row per task, dependencies in a "predecessors" cell
+such as "t2FS; t3SS+2". Every field this table carries survives export followed by import.
+
+```ts
+const COLUMNS: readonly ['id', 'name', 'type', 'parent', 'kind', 'start', 'duration', 'durationUnit', 'progress', 'owner', 'predecessors', 'constraint', 'constraintDate', 'deadline', 'mode']
+```
+
 ## Column
 
 *type* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
@@ -16,15 +27,44 @@ One column name of the import/export table.
 export type Column = (typeof COLUMNS)[number];
 ```
 
-## COLUMNS
+## ImportResult
+
+*type* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
+
+The roadmap read from a table, with warnings, or the reasons it was refused.
+
+```ts
+export type ImportResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
+```
+
+## MSPDI_FIELDS
+
+*const* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
+
+Task and link fields MSPDI carries; an import changes only these.
+
+```ts
+const MSPDI_FIELDS: { task: string[]; link: string[]; }
+```
+
+## MsImport
+
+*type* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
+
+The roadmap read from a Project file, with warnings, or the reasons it was refused.
+
+```ts
+export type MsImport = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
+```
+
+## TABLE_FIELDS
 
 *const* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
 
-The task table shared by CSV and Excel (I1, I3): one row per task, dependencies in a "predecessors" cell
-such as "t2FS; t3SS+2". Every field this table carries survives export followed by import.
+Task and link fields the table carries; an import changes only these (others are kept as they are).
 
 ```ts
-const COLUMNS: readonly ['id', 'name', 'type', 'parent', 'kind', 'start', 'duration', 'durationUnit', 'progress', 'owner', 'predecessors', 'constraint', 'constraintDate', 'deadline', 'mode']
+const TABLE_FIELDS: { task: string[]; link: string[]; }
 ```
 
 ## crc32
@@ -79,36 +119,6 @@ Reads an Excel workbook into a roadmap; any failure to read the file is returned
 export async function fromXlsx(bytes: Uint8Array, base: Parameters<typeof docFromTable>[1]): Promise<ImportResult>
 ```
 
-## ImportResult
-
-*type* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
-
-The roadmap read from a table, with warnings, or the reasons it was refused.
-
-```ts
-export type ImportResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
-```
-
-## MsImport
-
-*type* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
-
-The roadmap read from a Project file, with warnings, or the reasons it was refused.
-
-```ts
-export type MsImport = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
-```
-
-## MSPDI_FIELDS
-
-*const* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
-
-Task and link fields MSPDI carries; an import changes only these.
-
-```ts
-const MSPDI_FIELDS: { task: string[]; link: string[]; }
-```
-
 ## readCsv
 
 *function* · [packages/interchange/src/csv.ts](../../packages/interchange/src/csv.ts)
@@ -138,16 +148,6 @@ through the central directory at the end of the file.
 
 ```ts
 export async function readZip(bytes: Uint8Array): Promise<Map<string, Uint8Array>>
-```
-
-## TABLE_FIELDS
-
-*const* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
-
-Task and link fields the table carries; an import changes only these (others are kept as they are).
-
-```ts
-const TABLE_FIELDS: { task: string[]; link: string[]; }
 ```
 
 ## tableFromDoc

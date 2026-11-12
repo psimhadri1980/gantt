@@ -83,26 +83,6 @@ export interface GanttBackend {
 }
 ```
 
-## httpBackend
-
-*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
-
-The reference server over HTTP, with server-sent events for live updates.
-
-```ts
-export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof fetch = fetch): GanttBackend
-```
-
-## memoryBackend
-
-*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
-
-The service in the same page: mock mode (M7). Each call is a microtask, like a network round trip.
-
-```ts
-export function memoryBackend(service: RoadmapService, userId: string): GanttBackend
-```
-
 ## ProposalSummary
 
 *type* · [packages/service/src/service.ts](../../packages/service/src/service.ts)
@@ -267,4 +247,24 @@ export interface Snapshot {
   /** What the user may do with Proposals in general (F14). */
   can: Partial<Record<Permission, boolean>>;
 }
+```
+
+## httpBackend
+
+*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
+
+The reference server over HTTP, with server-sent events for live updates.
+
+```ts
+export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof fetch = fetch): GanttBackend
+```
+
+## memoryBackend
+
+*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
+
+The service in the same page: mock mode (M7). Each call is a microtask, like a network round trip.
+
+```ts
+export function memoryBackend(service: RoadmapService, userId: string): GanttBackend
 ```

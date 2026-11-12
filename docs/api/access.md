@@ -61,16 +61,6 @@ A change to a roadmap, in the shape of contract ProposalChange.
 export interface ChangeLike { entity: string; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> }
 ```
 
-## checkChange
-
-*function* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
-
-Whether `ev` allows a change to `task` (the task as it is before the change; undefined for a create).
-
-```ts
-export function checkChange(ev: AccessEvaluator, c: ChangeLike, task: TaskLike | undefined, project?: string)
-```
-
 ## Condition
 
 *type* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
@@ -91,49 +81,6 @@ The answer to "may this happen?", with the reason when it may not.
 export interface Decision { allowed: boolean; reason?: string }
 ```
 
-## filterDocument
-
-*function* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
-
-What a user may see (L12): tasks without `view` are removed with their whole subtree, links touching a
-removed task are removed, and fields outside the user's `view.fields` are stripped. The server applies
-this before sending anything; the component applies it again so its view never differs.
-
-```ts
-export function filterDocument<D extends DocLike>(doc: D, ev: AccessEvaluator): D
-```
-
-## fullAccess
-
-*function* · [packages/access/src/evaluate.ts](../../packages/access/src/evaluate.ts)
-
-Every permission, for one subject. Used for mock mode, where a file without rules means full access (section 3b).
-
-```ts
-export function fullAccess(userId = 'mock-user'): AccessRules
-```
-
-## mergeAccess
-
-*function* · [packages/access/src/evaluate.ts](../../packages/access/src/evaluate.ts)
-
-Static data and a resolver result (L11): the resolver wins for the fields it returns. `rules` from the
-resolver replaces the static list rather than appending, so a resolver can also narrow access.
-
-```ts
-export function mergeAccess(staticRules: AccessRules | null | undefined, resolved: Partial<AccessRules> | null | undefined): AccessRules | null
-```
-
-## Permission
-
-*type* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
-
-One permission name, such as 'view', 'task.modify' or 'proposal.approve'.
-
-```ts
-export type Permission = (typeof PERMISSIONS)[number];
-```
-
 ## PERMISSIONS
 
 *const* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
@@ -144,14 +91,14 @@ Permission vocabulary (plan section 3).
 const PERMISSIONS: readonly ['view', 'view.fields', 'view.baselines', 'view.resources', 'view.history', 'task.create', 'task.modify.dates', 'task.modify.progress', 'task.modify.fields', 'task.reorder', 'task.delete', 'link.create', 'link.modify', 'link.delete', 'schedule.run', 'constraint.edit', 'calendar.edit', 'proposal.create', 'proposal.edit', 'proposal.refresh', 'proposal.submit', 'proposal.review', 'proposal.a …
 ```
 
-## permissionsForChange
+## Permission
 
-*function* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
+*type* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
-The permissions a change needs, each with the field it applies to (L2).
+One permission name, such as 'view', 'task.modify' or 'proposal.approve'.
 
 ```ts
-export function permissionsForChange(c: ChangeLike): { permission: Permission; field?: string }[]
+export type Permission = (typeof PERMISSIONS)[number];
 ```
 
 ## Rule
@@ -197,6 +144,59 @@ Who is asking: a user id with the roles and groups that rules can match.
 
 ```ts
 export interface Subject { id: string; roles?: string[]; groups?: string[] }
+```
+
+## checkChange
+
+*function* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
+
+Whether `ev` allows a change to `task` (the task as it is before the change; undefined for a create).
+
+```ts
+export function checkChange(ev: AccessEvaluator, c: ChangeLike, task: TaskLike | undefined, project?: string)
+```
+
+## filterDocument
+
+*function* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
+
+What a user may see (L12): tasks without `view` are removed with their whole subtree, links touching a
+removed task are removed, and fields outside the user's `view.fields` are stripped. The server applies
+this before sending anything; the component applies it again so its view never differs.
+
+```ts
+export function filterDocument<D extends DocLike>(doc: D, ev: AccessEvaluator): D
+```
+
+## fullAccess
+
+*function* · [packages/access/src/evaluate.ts](../../packages/access/src/evaluate.ts)
+
+Every permission, for one subject. Used for mock mode, where a file without rules means full access (section 3b).
+
+```ts
+export function fullAccess(userId = 'mock-user'): AccessRules
+```
+
+## mergeAccess
+
+*function* · [packages/access/src/evaluate.ts](../../packages/access/src/evaluate.ts)
+
+Static data and a resolver result (L11): the resolver wins for the fields it returns. `rules` from the
+resolver replaces the static list rather than appending, so a resolver can also narrow access.
+
+```ts
+export function mergeAccess(staticRules: AccessRules | null | undefined, resolved: Partial<AccessRules> | null | undefined): AccessRules | null
+```
+
+## permissionsForChange
+
+*function* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
+
+The permissions a change needs, each with the field it applies to (L2).
+
+```ts
+export function permissionsForChange(c: ChangeLike): { permission: Permission; field?: string }[]
 ```
 
 ## taskContext

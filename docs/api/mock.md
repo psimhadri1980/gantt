@@ -6,26 +6,6 @@ Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand
 
 6 exports.
 
-## exportMock
-
-*function* · [packages/mock/src/index.ts](../../packages/mock/src/index.ts)
-
-Export the current state back to JSON in the same contract (M8).
-
-```ts
-export function exportMock(doc: RoadmapDocument): string
-```
-
-## generate
-
-*function* · [packages/mock/src/generate.ts](../../packages/mock/src/generate.ts)
-
-Deterministic generator for large valid files (M10).
-
-```ts
-export function generate(opts: GenerateOptions): RoadmapDocument
-```
-
 ## GenerateOptions
 
 *interface* · [packages/mock/src/generate.ts](../../packages/mock/src/generate.ts)
@@ -46,16 +26,6 @@ export interface GenerateOptions {
 }
 ```
 
-## loadMock
-
-*function* · [packages/mock/src/index.ts](../../packages/mock/src/index.ts)
-
-Mock loader (M1, M4, M5). A separate import: a bundle that never imports
-
-```ts
-export function loadMock(input: string | unknown): LoadResult
-```
-
 ## LoadResult
 
 *type* · [packages/mock/src/index.ts](../../packages/mock/src/index.ts)
@@ -64,6 +34,36 @@ The result of loading a mock file: the document (with warnings) or the reasons i
 
 ```ts
 export type LoadResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[]; warnings: Issue[] };
+```
+
+## exportMock
+
+*function* · [packages/mock/src/index.ts](../../packages/mock/src/index.ts)
+
+Export the current state back to JSON in the same contract (M8).
+
+```ts
+export function exportMock(doc: RoadmapDocument): string
+```
+
+## generate
+
+*function* · [packages/mock/src/generate.ts](../../packages/mock/src/generate.ts)
+
+Deterministic generator for large valid files (M10).
+
+```ts
+export function generate(opts: GenerateOptions): RoadmapDocument
+```
+
+## loadMock
+
+*function* · [packages/mock/src/index.ts](../../packages/mock/src/index.ts)
+
+Mock loader (M1, M4, M5). A separate import: a bundle that never imports
+
+```ts
+export function loadMock(input: string | unknown): LoadResult
 ```
 
 ## splitForLazyLoading

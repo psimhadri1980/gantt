@@ -6,6 +6,16 @@ Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand
 
 3 exports.
 
+## ServerEnv
+
+*interface* · [packages/server/src/env.ts](../../packages/server/src/env.ts)
+
+Environment configuration (plan section 4). The safe direction wins for every variable.
+
+```ts
+export interface ServerEnv { mockData: boolean; separationOfDuties: boolean; environment: string; port: number }
+```
+
 ## createGanttServer
 
 *function* · [packages/server/src/server.ts](../../packages/server/src/server.ts)
@@ -28,14 +38,4 @@ ignores mock data in production; and returns a warning for every relaxed setting
 
 ```ts
 export function readEnv(env: Record<string, string | undefined>): { ok: true; env: ServerEnv; warnings: string[] } | { ok: false; error: string }
-```
-
-## ServerEnv
-
-*interface* · [packages/server/src/env.ts](../../packages/server/src/env.ts)
-
-Environment configuration (plan section 4). The safe direction wins for every variable.
-
-```ts
-export interface ServerEnv { mockData: boolean; separationOfDuties: boolean; environment: string; port: number }
 ```

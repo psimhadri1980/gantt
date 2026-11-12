@@ -6,28 +6,6 @@ Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand
 
 66 exports.
 
-## applyDataOperation
-
-*function* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
-
-Applies a data operation to a document. Returns the new document and the operations that undo it.
-The input is never mutated. The result is validated against the contract, so an operation cannot
-produce a document that would be refused on load (cycles, dangling ids, bad dates).
-
-```ts
-export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { doc: RoadmapDocument; inverse: DataOperation[] } | { error: string }
-```
-
-## barIndex
-
-*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
-
-Where each visible bar sits vertically: the row's index and centre line.
-
-```ts
-export function barIndex(rows: RowLayout[], sizes: RowSizes = DEFAULT_SIZES): Map<string, { row: RowLayout; y: number; h: number }>
-```
-
 ## BarLayout
 
 *interface* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
@@ -53,16 +31,6 @@ A bar's vertical position: top (y) and height in pixels.
 export interface BarPos { y: number; h: number }
 ```
 
-## buildModel
-
-*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
-
-`placement` may be passed in when it was computed in an earlier task (staged loading).
-
-```ts
-export function buildModel(doc: RoadmapDocument, placement: Placement = place(doc)): Model
-```
-
 ## ColumnState
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
@@ -73,15 +41,12 @@ A grid column's width and visibility as the user left them.
 export interface ColumnState { id: string; width?: number; hidden?: boolean }
 ```
 
-## copyTasks
+## DEFAULT_SIZES
 
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Copies tasks for pasting (D15): each selected subtree once (children of a selected parent come with it),
-with the links that run between copied tasks.
+*const* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
 
 ```ts
-export function copyTasks(m: Model, ids: string[]): TreeClipboard
+const DEFAULT_SIZES: RowSizes
 ```
 
 ## DataOperation
@@ -103,82 +68,12 @@ export type DataOperation =
   | { type: 'batch'; ops: DataOperation[]; label?: string };
 ```
 
-## dateFormat
+## GROUP_PREFIX
 
-*function* · [packages/state/src/format.ts](../../packages/state/src/format.ts)
-
-A cached `Intl.DateTimeFormat`: creating one is slow, and the chart formats thousands of dates per frame.
+*const* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
 
 ```ts
-export function dateFormat(locale: string | undefined, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat
-```
-
-## dayAt
-
-*const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
-
-The day at an x position.
-
-```ts
-const dayAt: (s: Scale, x: number) => number
-```
-
-## DEFAULT_SIZES
-
-*const* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
-
-```ts
-const DEFAULT_SIZES: RowSizes
-```
-
-## duplicateOps
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Duplicate (D15): a copy of each subtree placed just after the original.
-
-```ts
-export function duplicateOps(m: Model, ids: string[], newId: () => string): TreeResult & { ids?: string[] }
-```
-
-## fieldValue
-
-*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-The value of a field for sorting, filtering and grouping: placed dates and progress for the computed fields.
-
-```ts
-export function fieldValue(m: Model, id: string, field: string): unknown
-```
-
-## findTasks
-
-*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-Find (D19): ids whose name contains the text, or whose id or WBS code equals it, in tree order.
-
-```ts
-export function findTasks(m: Model, q: string): string[]
-```
-
-## flattenOps
-
-*const* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
-
-The single operations inside an operation, in order.
-
-```ts
-const flattenOps: (op: DataOperation) => DataOperation[]
-```
-
-## formatDay
-
-*const* · [packages/state/src/format.ts](../../packages/state/src/format.ts)
-
-Formats a day number in the locale with the given options.
-
-```ts
-const formatDay: (day: number, locale: string | undefined, opts: Intl.DateTimeFormatOptions) => string
+const GROUP_PREFIX: '\u0001group:'
 ```
 
 ## GanttOperation
@@ -215,14 +110,6 @@ export interface GanttViewState {
 }
 ```
 
-## GROUP_PREFIX
-
-*const* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-```ts
-const GROUP_PREFIX: '\u0001group:'
-```
-
 ## HOUR_ZOOM
 
 *const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
@@ -231,66 +118,6 @@ An hour level for hour-based plans (G4); add it to `zoomLevels` when needed.
 
 ```ts
 const HOUR_ZOOM: ZoomLevel
-```
-
-## indentOps
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Indent (D16): each task becomes the last child of the sibling just above it.
-
-```ts
-export function indentOps(m: Model, ids: string[]): TreeResult
-```
-
-## isDataOperation
-
-*const* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
-
-True for operations that change the roadmap (and so go through permissions, Proposals and undo).
-
-```ts
-const isDataOperation: (op: GanttOperation) => op is DataOperation
-```
-
-## isGroupId
-
-*const* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-True for the id of a group header row (rows made by "group by", not tasks).
-
-```ts
-const isGroupId: (id: string) => boolean
-```
-
-## isoWeek
-
-*function* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
-
-ISO 8601 week number of a day: weeks start on Monday, and week 1 is the week containing the year's first Thursday.
-
-```ts
-export function isoWeek(d: DayNum): number
-```
-
-## isViewActive
-
-*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-True when the view changes what is shown (a sort, a group or a non-empty filter), so the UI can offer "Reset view".
-
-```ts
-export function isViewActive(v: GanttViewState | undefined): boolean
-```
-
-## isWithin
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-True when `id` is `ancestor` or below it.
-
-```ts
-export function isWithin(m: Model, id: string, ancestor: string): boolean
 ```
 
 ## LANE_PAD
@@ -309,61 +136,6 @@ const LANE_PAD: 4
 const LANE_TRACK: 28
 ```
 
-## layoutRows
-
-*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
-
-Flattens the tree into visible rows. Lane rows (A6) draw their children as bars on the row itself,
-stacked into tracks where they overlap, so rows differ in height. `laneOpen` lists lanes the user has
-opened into ordinary rows.
-
-```ts
-export function layoutRows(m: Model, collapsed: ReadonlySet<string>, laneOpen: ReadonlySet<string> = new Set(), sizes: RowSizes = DEFAULT_SIZES): RowLayout[]
-```
-
-## linkPath
-
-*function* · [packages/state/src/links.ts](../../packages/state/src/links.ts)
-
-Orthogonal connector path for a link (A2). Bars run from the start of their first day to the end
-of their last day; a milestone sits at the start of its day.
-
-```ts
-export function linkPath(l: Link, p: Placement, pos: Map<string, BarPos>, s: Scale): string | null
-```
-
-## localeWeekStart
-
-*function* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
-
-First day of the week for a locale (G14): 0 = Sunday, 1 = Monday … 6 = Saturday. Uses `Intl.Locale#getWeekInfo`
-(or the older `weekInfo` property) where the runtime has it, and falls back to Monday (ISO 8601).
-
-```ts
-export function localeWeekStart(locale?: string): number
-```
-
-## matchesText
-
-*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-True when the task's name, id or WBS code contains the search text (ignoring case and surrounding spaces).
-
-```ts
-export function matchesText(m: Model, id: string, q: string): boolean
-```
-
-## mergeChildren
-
-*function* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
-
-Merges children loaded on demand (H2) under `parentId`. This is data arriving, not an edit: it does not
-go through interception or authorisation and is not undoable. The result is validated like any load.
-
-```ts
-export function mergeChildren(doc: RoadmapDocument, parentId: string, loaded: { tasks: Task[]; links?: Link[] }): { doc: RoadmapDocument } | { error: string }
-```
-
 ## Model
 
 *interface* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
@@ -380,27 +152,6 @@ export interface Model {
   linksByTask: Map<string, Link[]>;
   wbs: Map<string, string>;
 }
-```
-
-## moveOps
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Places `ids` (in that order) under `parent` before the sibling at `index` of the current child list,
-numbering the new sibling list with `order`. A task cannot move into itself or its own subtree.
-
-```ts
-export function moveOps(m: Model, ids: string[], parent: string | null, index: number): TreeResult
-```
-
-## newTaskOps
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-A new task (D3, D4) under `parent` at `index`, starting on `start` when given.
-
-```ts
-export function newTaskOps(m: Model, parent: string | null, index: number, task: Pick<Task, 'id' | 'name' | 'type'> & Partial<Task>): TreeResult
 ```
 
 ## OperationContext
@@ -459,43 +210,12 @@ export type OperationResult =
   | { ok: false; operation: GanttOperation; reason: string; stage: 'intercepted' | 'authorization' | 'invalid' };
 ```
 
-## outdentOps
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Outdent (D16): each task moves up one level, just after its parent.
-
-```ts
-export function outdentOps(m: Model, ids: string[]): TreeResult
-```
-
-## pasteOps
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Paste (D15): new ids for every task and internal link, roots placed under `parent` at `index`.
-Dates and fields are kept; names are kept as they are.
-
-```ts
-export function pasteOps(m: Model, clip: TreeClipboard, parent: string | null, index: number, newId: () => string): TreeResult & { ids?: string[] }
-```
-
 ## ROW_HEIGHT
 
 *const* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
 
 ```ts
 const ROW_HEIGHT: 36
-```
-
-## rowAt
-
-*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
-
-Index of the first row whose bottom is below y (binary search over variable heights).
-
-```ts
-export function rowAt(rows: RowLayout[], y: number): number
 ```
 
 ## RowLayout
@@ -529,16 +249,6 @@ Row geometry (G1). Bars take the row height minus a margin; lane tracks stack ba
 
 ```ts
 export interface RowSizes { row: number; laneTrack: number }
-```
-
-## sameTarget
-
-*const* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
-
-True when two selection targets point at the same row, bar or link.
-
-```ts
-const sameTarget: (a: SelectionTarget, b: SelectionTarget) => boolean
 ```
 
 ## SavedView
@@ -584,26 +294,6 @@ export type SelectionTarget =
   | { type: 'link'; linkId: string };
 ```
 
-## sortTreeOrder
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Sorts ids by their position in the expanded tree.
-
-```ts
-export function sortTreeOrder(m: Model, ids: string[]): string[]
-```
-
-## targetKey
-
-*const* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
-
-A string key for a selection target, used in sets and as React keys.
-
-```ts
-const targetKey: (t: SelectionTarget) => string
-```
-
 ## Tick
 
 *interface* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
@@ -612,38 +302,6 @@ One label on the time scale: the day it starts, its position and width in pixels
 
 ```ts
 export interface Tick { day: DayNum; x: number; w: number; label: string }
-```
-
-## ticks
-
-*function* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
-
-Ticks of one unit covering [from, to], labelled via Intl in the given locale.
-Week ticks begin on `weekStart` (0 = Sunday … 6 = Saturday; default Monday). The week number shown is the
-ISO week of the Monday inside that week, so a Sunday-start week is numbered like the ISO week that follows it.
-
-```ts
-export function ticks(s: Scale, unit: ScaleUnit, from: DayNum, to: DayNum, locale?: string, format?: (day: number, locale?: string) => string, weekStart = 1): Tick[]
-```
-
-## topmost
-
-*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
-
-Of the given ids, those whose ancestors are not also given (moving a parent moves its subtree).
-
-```ts
-export function topmost(m: Model, ids: Iterable<string>): string[]
-```
-
-## totalHeight
-
-*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
-
-Total height in pixels of the given rows (the bottom of the last one).
-
-```ts
-export function totalHeight(rows: RowLayout[]): number
 ```
 
 ## TreeClipboard
@@ -682,17 +340,6 @@ export interface ViewFilter {
 }
 ```
 
-## viewModel
-
-*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
-
-The model as the view shows it. Filtering keeps matches and their ancestors; sorting orders siblings;
-grouping puts leaf tasks under one synthetic row per value. Returns the same model when no view is active.
-
-```ts
-export function viewModel(m: Model, v: GanttViewState | undefined, groupLabel: (field: string, value: string) => string = (_f, val) => val || '—'): { model: Model; matches: Set<string> | null }
-```
-
 ## ViewOperation
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
@@ -721,16 +368,6 @@ A view is plain JSON so the host can store and share it (for example in the URL)
 export interface ViewSort { field: string; dir: 'asc' | 'desc' }
 ```
 
-## xOf
-
-*const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
-
-The x position (in pixels) of the start of a day.
-
-```ts
-const xOf: (s: Scale, d: DayNum) => number
-```
-
 ## ZOOM_LEVELS
 
 *const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
@@ -751,4 +388,367 @@ export interface ZoomLevel {
   id: string; label: string; pxPerDay: number; major: ScaleUnit; minor: ScaleUnit;
   format?: Partial<Record<ScaleUnit, (day: number, locale?: string) => string>>;
 }
+```
+
+## applyDataOperation
+
+*function* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+Applies a data operation to a document. Returns the new document and the operations that undo it.
+The input is never mutated. The result is validated against the contract, so an operation cannot
+produce a document that would be refused on load (cycles, dangling ids, bad dates).
+
+```ts
+export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { doc: RoadmapDocument; inverse: DataOperation[] } | { error: string }
+```
+
+## barIndex
+
+*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
+
+Where each visible bar sits vertically: the row's index and centre line.
+
+```ts
+export function barIndex(rows: RowLayout[], sizes: RowSizes = DEFAULT_SIZES): Map<string, { row: RowLayout; y: number; h: number }>
+```
+
+## buildModel
+
+*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
+
+`placement` may be passed in when it was computed in an earlier task (staged loading).
+
+```ts
+export function buildModel(doc: RoadmapDocument, placement: Placement = place(doc)): Model
+```
+
+## copyTasks
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Copies tasks for pasting (D15): each selected subtree once (children of a selected parent come with it),
+with the links that run between copied tasks.
+
+```ts
+export function copyTasks(m: Model, ids: string[]): TreeClipboard
+```
+
+## dateFormat
+
+*function* · [packages/state/src/format.ts](../../packages/state/src/format.ts)
+
+A cached `Intl.DateTimeFormat`: creating one is slow, and the chart formats thousands of dates per frame.
+
+```ts
+export function dateFormat(locale: string | undefined, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat
+```
+
+## dayAt
+
+*const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+The day at an x position.
+
+```ts
+const dayAt: (s: Scale, x: number) => number
+```
+
+## duplicateOps
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Duplicate (D15): a copy of each subtree placed just after the original.
+
+```ts
+export function duplicateOps(m: Model, ids: string[], newId: () => string): TreeResult & { ids?: string[] }
+```
+
+## fieldValue
+
+*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+The value of a field for sorting, filtering and grouping: placed dates and progress for the computed fields.
+
+```ts
+export function fieldValue(m: Model, id: string, field: string): unknown
+```
+
+## findTasks
+
+*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+Find (D19): ids whose name contains the text, or whose id or WBS code equals it, in tree order.
+
+```ts
+export function findTasks(m: Model, q: string): string[]
+```
+
+## flattenOps
+
+*const* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+The single operations inside an operation, in order.
+
+```ts
+const flattenOps: (op: DataOperation) => DataOperation[]
+```
+
+## formatDay
+
+*const* · [packages/state/src/format.ts](../../packages/state/src/format.ts)
+
+Formats a day number in the locale with the given options.
+
+```ts
+const formatDay: (day: number, locale: string | undefined, opts: Intl.DateTimeFormatOptions) => string
+```
+
+## indentOps
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Indent (D16): each task becomes the last child of the sibling just above it.
+
+```ts
+export function indentOps(m: Model, ids: string[]): TreeResult
+```
+
+## isDataOperation
+
+*const* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+True for operations that change the roadmap (and so go through permissions, Proposals and undo).
+
+```ts
+const isDataOperation: (op: GanttOperation) => op is DataOperation
+```
+
+## isGroupId
+
+*const* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+True for the id of a group header row (rows made by "group by", not tasks).
+
+```ts
+const isGroupId: (id: string) => boolean
+```
+
+## isViewActive
+
+*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+True when the view changes what is shown (a sort, a group or a non-empty filter), so the UI can offer "Reset view".
+
+```ts
+export function isViewActive(v: GanttViewState | undefined): boolean
+```
+
+## isWithin
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+True when `id` is `ancestor` or below it.
+
+```ts
+export function isWithin(m: Model, id: string, ancestor: string): boolean
+```
+
+## isoWeek
+
+*function* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+ISO 8601 week number of a day: weeks start on Monday, and week 1 is the week containing the year's first Thursday.
+
+```ts
+export function isoWeek(d: DayNum): number
+```
+
+## layoutRows
+
+*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
+
+Flattens the tree into visible rows. Lane rows (A6) draw their children as bars on the row itself,
+stacked into tracks where they overlap, so rows differ in height. `laneOpen` lists lanes the user has
+opened into ordinary rows.
+
+```ts
+export function layoutRows(m: Model, collapsed: ReadonlySet<string>, laneOpen: ReadonlySet<string> = new Set(), sizes: RowSizes = DEFAULT_SIZES): RowLayout[]
+```
+
+## linkPath
+
+*function* · [packages/state/src/links.ts](../../packages/state/src/links.ts)
+
+Orthogonal connector path for a link (A2). Bars run from the start of their first day to the end
+of their last day; a milestone sits at the start of its day.
+
+```ts
+export function linkPath(l: Link, p: Placement, pos: Map<string, BarPos>, s: Scale): string | null
+```
+
+## localeWeekStart
+
+*function* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+First day of the week for a locale (G14): 0 = Sunday, 1 = Monday … 6 = Saturday. Uses `Intl.Locale#getWeekInfo`
+(or the older `weekInfo` property) where the runtime has it, and falls back to Monday (ISO 8601).
+
+```ts
+export function localeWeekStart(locale?: string): number
+```
+
+## matchesText
+
+*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+True when the task's name, id or WBS code contains the search text (ignoring case and surrounding spaces).
+
+```ts
+export function matchesText(m: Model, id: string, q: string): boolean
+```
+
+## mergeChildren
+
+*function* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+Merges children loaded on demand (H2) under `parentId`. This is data arriving, not an edit: it does not
+go through interception or authorisation and is not undoable. The result is validated like any load.
+
+```ts
+export function mergeChildren(doc: RoadmapDocument, parentId: string, loaded: { tasks: Task[]; links?: Link[] }): { doc: RoadmapDocument } | { error: string }
+```
+
+## moveOps
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Places `ids` (in that order) under `parent` before the sibling at `index` of the current child list,
+numbering the new sibling list with `order`. A task cannot move into itself or its own subtree.
+
+```ts
+export function moveOps(m: Model, ids: string[], parent: string | null, index: number): TreeResult
+```
+
+## newTaskOps
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+A new task (D3, D4) under `parent` at `index`, starting on `start` when given.
+
+```ts
+export function newTaskOps(m: Model, parent: string | null, index: number, task: Pick<Task, 'id' | 'name' | 'type'> & Partial<Task>): TreeResult
+```
+
+## outdentOps
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Outdent (D16): each task moves up one level, just after its parent.
+
+```ts
+export function outdentOps(m: Model, ids: string[]): TreeResult
+```
+
+## pasteOps
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Paste (D15): new ids for every task and internal link, roots placed under `parent` at `index`.
+Dates and fields are kept; names are kept as they are.
+
+```ts
+export function pasteOps(m: Model, clip: TreeClipboard, parent: string | null, index: number, newId: () => string): TreeResult & { ids?: string[] }
+```
+
+## rowAt
+
+*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
+
+Index of the first row whose bottom is below y (binary search over variable heights).
+
+```ts
+export function rowAt(rows: RowLayout[], y: number): number
+```
+
+## sameTarget
+
+*const* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
+
+True when two selection targets point at the same row, bar or link.
+
+```ts
+const sameTarget: (a: SelectionTarget, b: SelectionTarget) => boolean
+```
+
+## sortTreeOrder
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Sorts ids by their position in the expanded tree.
+
+```ts
+export function sortTreeOrder(m: Model, ids: string[]): string[]
+```
+
+## targetKey
+
+*const* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
+
+A string key for a selection target, used in sets and as React keys.
+
+```ts
+const targetKey: (t: SelectionTarget) => string
+```
+
+## ticks
+
+*function* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+Ticks of one unit covering [from, to], labelled via Intl in the given locale.
+Week ticks begin on `weekStart` (0 = Sunday … 6 = Saturday; default Monday). The week number shown is the
+ISO week of the Monday inside that week, so a Sunday-start week is numbered like the ISO week that follows it.
+
+```ts
+export function ticks(s: Scale, unit: ScaleUnit, from: DayNum, to: DayNum, locale?: string, format?: (day: number, locale?: string) => string, weekStart = 1): Tick[]
+```
+
+## topmost
+
+*function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Of the given ids, those whose ancestors are not also given (moving a parent moves its subtree).
+
+```ts
+export function topmost(m: Model, ids: Iterable<string>): string[]
+```
+
+## totalHeight
+
+*function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
+
+Total height in pixels of the given rows (the bottom of the last one).
+
+```ts
+export function totalHeight(rows: RowLayout[]): number
+```
+
+## viewModel
+
+*function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+The model as the view shows it. Filtering keeps matches and their ancestors; sorting orders siblings;
+grouping puts leaf tasks under one synthetic row per value. Returns the same model when no view is active.
+
+```ts
+export function viewModel(m: Model, v: GanttViewState | undefined, groupLabel: (field: string, value: string) => string = (_f, val) => val || '—'): { model: Model; matches: Set<string> | null }
+```
+
+## xOf
+
+*const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+The x position (in pixels) of the start of a day.
+
+```ts
+const xOf: (s: Scale, d: DayNum) => number
 ```

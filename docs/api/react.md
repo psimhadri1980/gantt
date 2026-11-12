@@ -45,14 +45,6 @@ export type DataOperation =
   | { type: 'batch'; ops: DataOperation[]; label?: string };
 ```
 
-## defaultMessages
-
-*const* · [packages/react/src/i18n.ts](../../packages/react/src/i18n.ts)
-
-```ts
-const defaultMessages: GanttMessages
-```
-
 ## DetailsProps
 
 *interface* · [packages/react/src/Details.tsx](../../packages/react/src/Details.tsx)
@@ -88,7 +80,7 @@ The Gantt. Resolves access first: without `view` nothing is fetched or rendered 
 either the given data (filtered for the user, L12) or the Proposal workflow against a backend.
 
 ```ts
-const Gantt: import("/home/simhadri/gantt/node_modules/@types/react/index").ForwardRefExoticComponent<GanttRootProps & import("/home/simhadri/gantt/node_modules/@types/react/index").RefAttributes<GanttHandle>>
+const Gantt: React.ForwardRefExoticComponent<GanttRootProps & React.RefAttributes<GanttHandle>>
 ```
 
 ## GanttBackend
@@ -544,14 +536,6 @@ export interface GanttViewState {
 }
 ```
 
-## germanMessages
-
-*const* · [packages/react/src/messages.de.ts](../../packages/react/src/messages.de.ts)
-
-```ts
-const germanMessages: GanttMessages
-```
-
 ## GridColumn
 
 *interface* · [packages/react/src/grid.tsx](../../packages/react/src/grid.tsx)
@@ -588,16 +572,6 @@ An hour level for hour-based plans (G4); add it to `zoomLevels` when needed.
 const HOUR_ZOOM: ZoomLevel
 ```
 
-## httpBackend
-
-*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
-
-The reference server over HTTP, with server-sent events for live updates.
-
-```ts
-export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof fetch = fetch): GanttBackend
-```
-
 ## KindDefinition
 
 *interface* · [packages/react/src/Details.tsx](../../packages/react/src/Details.tsx)
@@ -611,26 +585,6 @@ export interface KindDefinition<T> {
   /** Replace the default details with the host's own component (which may render `Default`). */
   details?: ComponentType<DetailsProps<T>>;
 }
-```
-
-## localeDir
-
-*function* · [packages/react/src/Gantt.tsx](../../packages/react/src/Gantt.tsx)
-
-Right-to-left for Arabic, Hebrew, Persian and Urdu locales (G14); everything else is left-to-right.
-
-```ts
-export function localeDir(locale?: string): 'ltr' | 'rtl'
-```
-
-## memoryBackend
-
-*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
-
-The service in the same page: mock mode (M7). Each call is a microtask, like a network round trip.
-
-```ts
-export function memoryBackend(service: RoadmapService, userId: string): GanttBackend
 ```
 
 ## OperationContext
@@ -706,16 +660,6 @@ Units a scale line can count in (G2, G5).
 export type ScaleUnit = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour';
 ```
 
-## scheduleOffThread
-
-*function* · [packages/react/src/engineClient.ts](../../packages/react/src/engineClient.ts)
-
-Runs the scheduling engine in the worker (C11); falls back to the main thread. `ms` is the engine time.
-
-```ts
-export async function scheduleOffThread(doc: RoadmapDocument): Promise<{ result: ScheduleResult; ms: number; offThread: boolean }>
-```
-
 ## SelectionTarget
 
 *type* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
@@ -782,4 +726,60 @@ export interface ZoomLevel {
   id: string; label: string; pxPerDay: number; major: ScaleUnit; minor: ScaleUnit;
   format?: Partial<Record<ScaleUnit, (day: number, locale?: string) => string>>;
 }
+```
+
+## defaultMessages
+
+*const* · [packages/react/src/i18n.ts](../../packages/react/src/i18n.ts)
+
+```ts
+const defaultMessages: GanttMessages
+```
+
+## germanMessages
+
+*const* · [packages/react/src/messages.de.ts](../../packages/react/src/messages.de.ts)
+
+```ts
+const germanMessages: GanttMessages
+```
+
+## httpBackend
+
+*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
+
+The reference server over HTTP, with server-sent events for live updates.
+
+```ts
+export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof fetch = fetch): GanttBackend
+```
+
+## localeDir
+
+*function* · [packages/react/src/Gantt.tsx](../../packages/react/src/Gantt.tsx)
+
+Right-to-left for Arabic, Hebrew, Persian and Urdu locales (G14); everything else is left-to-right.
+
+```ts
+export function localeDir(locale?: string): 'ltr' | 'rtl'
+```
+
+## memoryBackend
+
+*function* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
+
+The service in the same page: mock mode (M7). Each call is a microtask, like a network round trip.
+
+```ts
+export function memoryBackend(service: RoadmapService, userId: string): GanttBackend
+```
+
+## scheduleOffThread
+
+*function* · [packages/react/src/engineClient.ts](../../packages/react/src/engineClient.ts)
+
+Runs the scheduling engine in the worker (C11); falls back to the main thread. `ms` is the engine time.
+
+```ts
+export async function scheduleOffThread(doc: RoadmapDocument): Promise<{ result: ScheduleResult; ms: number; offThread: boolean }>
 ```

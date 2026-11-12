@@ -52,7 +52,9 @@ function signatureOf(d, name) {
   if (ts.isVariableDeclaration(d)) {
     // Constants show their type, not their (often long) value.
     const type = checker.typeToString(checker.getTypeAtLocation(d.name), d, ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.UseSingleQuotesForStringLiteralType);
-    return `const ${name}: ${type.length > 400 ? type.slice(0, 400) + ' …' : type}`;
+    // import("…/node_modules/@types/react/index").X → React.X, so no machine-specific path ends up in the docs.
+    const clean = type.replace(/import\("[^"]*\/@types\/react\/index"\)\./g, 'React.').replace(/import\("[^"]*"\)\./g, '');
+    return `const ${name}: ${clean.length > 400 ? clean.slice(0, 400) + ' …' : clean}`;
   }
   return d.getText(sf);
 }
@@ -87,7 +89,7 @@ for (const [i, pkg] of packages.entries()) {
       break; // overloads and merged declarations: the first is enough for the reference
     }
   }
-  items.sort((a, b) => a.name.localeCompare(b.name));
+  items.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)); // code-unit order: the same on every machine and locale
   lines.push(`${items.length} exports.`, '');
   for (const it of items) {
     lines.push(`## ${it.name}`, '', `*${it.kind}* · [${it.file}](../../${it.file})`, '');

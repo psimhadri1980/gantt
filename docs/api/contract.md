@@ -37,6 +37,32 @@ export interface Baseline {
 }
 ```
 
+## CONTRACT_ID
+
+*const* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
+
+```ts
+const CONTRACT_ID: 'gantt-roadmap/1'
+```
+
+## CONTRACT_MAJOR
+
+*const* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
+
+```ts
+const CONTRACT_MAJOR: 1
+```
+
+## CONTRACT_NAME
+
+*const* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
+
+Contract `gantt-roadmap/1` (plan section 3b).
+
+```ts
+const CONTRACT_NAME: 'gantt-roadmap'
+```
+
 ## Calendar
 
 *interface* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
@@ -65,32 +91,6 @@ must start on, must finish on (the date is in `constraintDate`).
 export type ConstraintType = 'ASAP' | 'SNET' | 'SNLT' | 'FNET' | 'FNLT' | 'MSO' | 'MFO';
 ```
 
-## CONTRACT_ID
-
-*const* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
-
-```ts
-const CONTRACT_ID: 'gantt-roadmap/1'
-```
-
-## CONTRACT_MAJOR
-
-*const* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
-
-```ts
-const CONTRACT_MAJOR: 1
-```
-
-## CONTRACT_NAME
-
-*const* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
-
-Contract `gantt-roadmap/1` (plan section 3b).
-
-```ts
-const CONTRACT_NAME: 'gantt-roadmap'
-```
-
 ## DurationUnit
 
 *type* · [packages/contract/src/types.ts](../../packages/contract/src/types.ts)
@@ -99,16 +99,6 @@ Whether a task's duration counts working days or working hours.
 
 ```ts
 export type DurationUnit = 'day' | 'hour';
-```
-
-## isIsoDate
-
-*function* · [packages/contract/src/validate.ts](../../packages/contract/src/validate.ts)
-
-True for a real calendar date written as YYYY-MM-DD (so "2026-02-30" is refused).
-
-```ts
-export function isIsoDate(v: unknown): v is string
 ```
 
 ## IsoDate
@@ -315,6 +305,28 @@ A plain task, a summary (spans its children) or a milestone (a point in time).
 export type TaskType = 'task' | 'summary' | 'milestone';
 ```
 
+## ValidationResult
+
+*type* · [packages/contract/src/validate.ts](../../packages/contract/src/validate.ts)
+
+The validated document with warnings, or the errors that refused it.
+
+```ts
+export type ValidationResult =
+  | { ok: true; doc: RoadmapDocument; warnings: Issue[] }
+  | { ok: false; errors: Issue[]; warnings: Issue[] };
+```
+
+## isIsoDate
+
+*function* · [packages/contract/src/validate.ts](../../packages/contract/src/validate.ts)
+
+True for a real calendar date written as YYYY-MM-DD (so "2026-02-30" is refused).
+
+```ts
+export function isIsoDate(v: unknown): v is string
+```
+
 ## validate
 
 *function* · [packages/contract/src/validate.ts](../../packages/contract/src/validate.ts)
@@ -326,16 +338,4 @@ Unknown fields are warnings. Cross-calendar `end` agreement is checked by the en
 
 ```ts
 export function validate(input: unknown): ValidationResult
-```
-
-## ValidationResult
-
-*type* · [packages/contract/src/validate.ts](../../packages/contract/src/validate.ts)
-
-The validated document with warnings, or the errors that refused it.
-
-```ts
-export type ValidationResult =
-  | { ok: true; doc: RoadmapDocument; warnings: Issue[] }
-  | { ok: false; errors: Issue[]; warnings: Issue[] };
 ```
