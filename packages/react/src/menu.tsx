@@ -11,7 +11,11 @@ export interface MenuItem {
   why?: string | null;
   shortcut?: string;
   checked?: boolean;
+  /** An on/off option: shown as a checkbox item, and the menu stays open so several can be switched in a row. */
+  toggle?: boolean;
   separator?: boolean;
+  /** A group title (not focusable), such as "Analysis" above the options it groups. */
+  heading?: boolean;
 }
 
 /**
@@ -49,11 +53,13 @@ export function ContextMenu({ x, y, items, onClose, label }: { x: number; y: num
   };
   return (
     <div ref={ref} className="gx-menu" role="menu" aria-label={typeof label === 'string' ? label : undefined} style={{ left: x, top: y }} onKeyDown={onKey}>
-      {items.map((it, i) => it.separator ? <div key={i} role="separator" className="gx-menu-sep" /> : (
-        <button key={i} role={it.checked !== undefined ? 'menuitemradio' : 'menuitem'} aria-checked={it.checked} className="gx-menu-item"
+      {items.map((it, i) => it.separator ? <div key={i} role="separator" className="gx-menu-sep" />
+        : it.heading ? <div key={i} role="presentation" className="gx-menu-heading">{it.label}</div> : (
+        <button key={i} role={it.toggle ? 'menuitemcheckbox' : it.checked !== undefined ? 'menuitemradio' : 'menuitem'}
+          aria-checked={it.toggle ? !!it.checked : it.checked} className={`gx-menu-item${it.toggle ? ' gx-menu-toggle' : ''}`}
           aria-disabled={!!it.why || undefined} title={it.why ?? undefined} tabIndex={-1}
-          onClick={() => { if (it.why) return; onClose(); it.run?.(); }}>
-          <span>{it.checked ? '✓ ' : ''}{it.label}</span>{it.shortcut && <kbd>{it.shortcut}</kbd>}
+          onClick={() => { if (it.why) return; if (!it.toggle) onClose(); it.run?.(); }}>
+          <span>{it.toggle ? <span className="gx-check" aria-hidden>{it.checked ? '✓' : ''}</span> : it.checked ? '✓ ' : ''}{it.label}</span>{it.shortcut && <kbd>{it.shortcut}</kbd>}
           {it.why && <span className="gx-sr">{it.why}</span>}
         </button>
       ))}

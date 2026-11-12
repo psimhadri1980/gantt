@@ -306,6 +306,10 @@ export interface GanttMessages {
   backlogHint: string;
   // interchange and platform (Phase 10)
   exportLabel: string;
+  /** Toolbar groups (accessible names) and menus. */
+  groupHistory: string; groupNavigate: string; groupPlanning: string; groupDisplay: string; groupViewTools: string;
+  showMenu: string; fileMenu: string; activeCount: (n: string) => string; taskTable: string;
+  groupAnalysis: string; groupTracking: string; groupResources: string; groupLayout: string;
   exportAs: Record<'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi', string>;
   importLabel: string;
   importHint: string;
@@ -606,6 +610,9 @@ export const defaultMessages: GanttMessages = {
   backlog: 'Backlog',
   backlogHint: 'Drag onto the chart to plan it',
   exportLabel: 'Export',
+  groupHistory: 'History', groupNavigate: 'Navigate', groupPlanning: 'Planning', groupDisplay: 'Display', groupViewTools: 'View tools',
+  showMenu: 'Show', fileMenu: 'File', activeCount: (n) => `${n} on`, taskTable: 'Task table',
+  groupAnalysis: 'Analysis', groupTracking: 'Tracking', groupResources: 'Resources', groupLayout: 'Layout',
   exportAs: { png: 'Image (PNG)', pdf: 'PDF', xlsx: 'Excel workbook', csv: 'CSV', mspdi: 'Microsoft Project XML' },
   importLabel: 'Import…',
   importHint: 'Excel, CSV or Microsoft Project XML',

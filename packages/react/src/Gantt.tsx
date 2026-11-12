@@ -1341,6 +1341,8 @@ function GanttView(props: CoreProps & {
   };
   // ---------- Interchange (I1–I4) and full screen (G8) ----------
   const [exportAt, setExportAt] = useState<{ x: number; y: number } | null>(null);
+  // The "Show" menu: everything that adds to or changes the chart, grouped, as on/off options.
+  const [showAt, setShowAt] = useState<{ x: number; y: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const exportAs = async (format: ExportFormat) => {
     try {
@@ -1456,6 +1458,22 @@ function GanttView(props: CoreProps & {
   const gw = gridWidth(cols);
   const [gridOnCompact, setGridOnCompact] = useState(false);
   const gridOff = compact ? !gridOnCompact : gridHidden;
+  const showItems: MenuItem[] = [
+    { label: m.groupAnalysis, heading: true },
+    { label: m.criticalPath, toggle: true, checked: showCritical, run: () => setShowCritical((v) => !v) },
+    { label: m.slackShow, toggle: true, checked: showSlack, run: () => setShowSlack((v) => !v) },
+    { label: m.rollups, toggle: true, checked: showRollups, run: () => setShowRollups((v) => !v) },
+    { label: m.groupTracking, heading: true },
+    { label: m.progressLine, toggle: true, checked: showPL, run: () => setShowPL((v) => !v) },
+    { label: m.sCurve, toggle: true, checked: showSCurve, run: () => setShowSCurve((v) => !v) },
+    { label: m.groupResources, heading: true },
+    { label: m.resourcesShow, toggle: true, checked: showLoad, run: () => setShowLoad((v) => !v) },
+    { label: m.groupLayout, heading: true },
+    { label: m.taskTable, toggle: true, checked: !gridOff, run: () => (compact ? setGridOnCompact((v) => !v) : setGridHidden((h) => !h)) },
+    { label: m.compact, toggle: true, checked: compact, run: () => setVs({ ...vs, compact: !compact || undefined }) },
+  ];
+  /** How many chart additions are switched on (shown on the menu button, so nothing on is hidden from view). */
+  const shownCount = [showCritical, showSlack, showRollups, showPL, showSCurve, showLoad].filter(Boolean).length;
 
   const Toolbar = props.toolbar === false ? null : props.toolbar ?? DefaultToolbar;
   const themeAttr = { ...(props.theme ? { 'data-theme': props.theme } : {}), dir: props.dir ?? localeDir(props.locale) };
@@ -1511,52 +1529,68 @@ function GanttView(props: CoreProps & {
       }}>
       {props.header}
       {Toolbar && (
-        <div className="gx-toolbar-row">
+        <div className="gx-toolbar-row" role="toolbar" aria-label={m.toolbarLabel}>
+          {/* Grouped left to right: history | navigation | planning | what to show, files | (right) view tools, status. */}
+          <div className="gx-tb-group" role="group" aria-label={m.groupHistory}>
+            <button className="gx-btn" aria-disabled={!props.history.canUndo || undefined} title={props.history.canUndo ? `${m.undo} (Ctrl+Z)` : m.nothingToUndo} onClick={() => void props.history.undo()}>{m.undo}</button>
+            <button className="gx-btn" aria-disabled={!props.history.canRedo || undefined} title={props.history.canRedo ? `${m.redo} (Ctrl+Y)` : m.nothingToRedo} onClick={() => void props.history.redo()}>{m.redo}</button>
+          </div>
+          <span className="gx-tb-sep" aria-hidden />
           <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit}
             critical={showCritical} setCritical={setShowCritical} runSchedule={runSchedule} scheduleWhyNot={scheduleWhyNot} />
-          <button className="gx-btn" aria-haspopup="menu" aria-expanded={!!exportAt} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setExportAt({ x: r.left, y: r.bottom + 4 }); }}>{m.exportLabel}</button>
-          <button className="gx-btn" title={m.importHint} onClick={() => fileRef.current?.click()}>{m.importLabel}</button>
-          <input ref={fileRef} type="file" hidden accept=".csv,.txt,.xlsx,.xml" aria-label={m.importLabel}
-            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
-          <button className="gx-btn" aria-pressed={isFull} onClick={toggleFullscreen}>{isFull ? m.exitFullscreen : m.fullscreen}</button>
-          <button className="gx-btn" aria-pressed={showSlack} onClick={() => setShowSlack((v) => !v)}>{m.slackShow}</button>
-          {baselines.length > 0 && <label className="gx-inline-label">{m.baselineLabel}{' '}
-            <select className="gx-select" value={baselineId} onChange={(e) => setBaselineId(e.target.value)}>
-              <option value="">{m.baselineNone}</option>
-              {baselines.map((b) => <option key={b.id} value={b.id}>{b.name} (v{b.version})</option>)}
-            </select></label>}
-          <button className="gx-btn" aria-pressed={showPL} onClick={() => setShowPL((v) => !v)}>{m.progressLine}</button>
-          {(showPL || showSCurve) && <label className="gx-inline-label">{m.statusDate}{' '}
-            <input className="gx-input" type="date" value={fromDay(statusDay)} onChange={(e) => setPlDate(e.target.value || null)} onKeyDown={(e) => e.stopPropagation()} /></label>}
-          <button className="gx-btn" aria-pressed={showRollups} onClick={() => setShowRollups((v) => !v)}>{m.rollups}</button>
-          <button className="gx-btn" aria-pressed={showSCurve} aria-expanded={showSCurve} onClick={() => setShowSCurve((v) => !v)}>{m.sCurve}</button>
-          <button className="gx-btn" aria-pressed={showLoad} aria-expanded={showLoad} onClick={() => setShowLoad((v) => !v)}>{m.resourcesShow}</button>
-          {(data.resources?.length ?? 0) > 0 && <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? undefined} onClick={() => { if (!scheduleWhyNot) levelRes(); }}>{m.levelResources}</button>}
-          <button className={`gx-btn${analysis?.issues.length ? ' gx-warn-btn' : ''}`} aria-haspopup="dialog" aria-expanded={!!problemsAt}
-            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setProblemsAt(problemsAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.problems(i18n.num(analysis?.issues.length ?? 0))}</button>
-          <button className="gx-btn" aria-disabled={!props.history.canUndo || undefined} title={props.history.canUndo ? `${m.undo} (Ctrl+Z)` : m.nothingToUndo} onClick={() => void props.history.undo()}>{m.undo}</button>
-          <button className="gx-btn" aria-disabled={!props.history.canRedo || undefined} title={props.history.canRedo ? `${m.redo} (Ctrl+Y)` : m.nothingToRedo} onClick={() => void props.history.redo()}>{m.redo}</button>
+          <span className="gx-tb-sep" aria-hidden />
+          <div className="gx-tb-group" role="group" aria-label={m.groupPlanning}>
+            <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? m.scheduleHint}
+              onClick={() => { if (!scheduleWhyNot) runSchedule(); }}>{m.schedule}{scheduleWhyNot && <span className="gx-sr">{scheduleWhyNot}</span>}</button>
+            <button className={`gx-btn${analysis?.issues.length ? ' gx-warn-btn' : ''}`} aria-haspopup="dialog" aria-expanded={!!problemsAt}
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setProblemsAt(problemsAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.problems(i18n.num(analysis?.issues.length ?? 0))}</button>
+            {(data.resources?.length ?? 0) > 0 && <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? undefined} onClick={() => { if (!scheduleWhyNot) levelRes(); }}>{m.levelResources}</button>}
+          </div>
+          <span className="gx-tb-sep" aria-hidden />
+          <div className="gx-tb-group" role="group" aria-label={m.groupDisplay}>
+            <button className={`gx-btn${shownCount ? ' gx-on' : ''}`} aria-haspopup="menu" aria-expanded={!!showAt}
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setShowAt(showAt ? null : { x: r.left, y: r.bottom + 4 }); }}>
+              {m.showMenu}{shownCount > 0 && <span className="gx-count" aria-label={m.activeCount(i18n.num(shownCount))}>{i18n.num(shownCount)}</span>}
+              <span className="gx-caret" aria-hidden>▾</span>
+            </button>
+            {/* Settings for what is switched on appear next to the menu, only while they apply. */}
+            {baselines.length > 0 && <label className="gx-inline-label">{m.baselineLabel}{' '}
+              <select className="gx-select" value={baselineId} onChange={(e) => setBaselineId(e.target.value)}>
+                <option value="">{m.baselineNone}</option>
+                {baselines.map((b) => <option key={b.id} value={b.id}>{b.name} (v{b.version})</option>)}
+              </select></label>}
+            {(showPL || showSCurve) && <label className="gx-inline-label">{m.statusDate}{' '}
+              <input className="gx-input" type="date" value={fromDay(statusDay)} onChange={(e) => setPlDate(e.target.value || null)} onKeyDown={(e) => e.stopPropagation()} /></label>}
+            <button className="gx-btn" aria-haspopup="menu" aria-expanded={!!exportAt} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setExportAt(exportAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.fileMenu}<span className="gx-caret" aria-hidden>▾</span></button>
+            <input ref={fileRef} type="file" hidden accept=".csv,.txt,.xlsx,.xml" aria-label={m.importLabel}
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+          </div>
           {(scheduleNote || notice) && <span className="gx-muted gx-notice" role="status">{notice || scheduleNote}</span>}
           {linkFrom && <span className="gx-chip gx-link-mode">{m.linkModeHint}</span>}
-          <input className="gx-input gx-filter" type="search" aria-label={m.filterLabel} placeholder={m.filterLabel} value={vs.filter?.text ?? ''}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => setVs({ ...vs, filter: { ...vs.filter, text: e.target.value } })} />
-          {findOpen
-            ? <FindBar inputRef={findInput} count={found.ids.length} index={found.i}
-                onQuery={(q) => { const ids = findTasks(baseModel, q); setFound({ ids, i: ids.length ? 0 : -1 }); goFound(ids, 0); }}
-                onStep={(d) => { const n = found.ids.length; if (!n) return; const i = (found.i + d + n) % n; setFound({ ids: found.ids, i }); goFound(found.ids, i); }}
-                onClose={() => { setFindOpen(false); setFound({ ids: [], i: -1 }); }} />
-            : <button className="gx-btn" title={`${m.find} (Ctrl+F)`} onClick={openFind}>{m.find}</button>}
-          <button className="gx-btn" aria-haspopup="dialog" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPop({ kind: 'columns', x: r.left, y: r.bottom + 4 }); }}>{m.columns}</button>
-          <ViewPicker views={saved} current={viewId} onPick={pickView} onSave={saveView} onDelete={deleteView} />
-          {vs.sort && <span className="gx-chip">{m.sortedBy(fieldLabel(vs.sort.field), vs.sort.dir)}<button className="gx-chip-x" aria-label={m.sortClear} onClick={() => setVs({ ...vs, sort: undefined })}>×</button></span>}
-          {vs.groupBy && <span className="gx-chip">{m.groupedBy(fieldLabel(vs.groupBy))}
-            <label className="gx-chip-opt"><input type="checkbox" checked={!!vs.groupLanes} onChange={(e) => setVs({ ...vs, groupLanes: e.target.checked || undefined })} /> {m.groupLanes}</label>
-            <button className="gx-chip-x" aria-label={m.ungroup} onClick={() => setVs({ ...vs, groupBy: undefined, groupLanes: undefined })}>×</button></span>}
-          {filterActive && <span className="gx-chip" role="status">{m.filtered(i18n.num(matchCount), i18n.num(baseModel.tasks.size))}<button className="gx-chip-x" aria-label={m.filterClear} onClick={() => setVs({ ...vs, filter: undefined })}>×</button></span>}
-          <button className="gx-btn" aria-pressed={compact} onClick={() => setVs({ ...vs, compact: !compact || undefined })}>{m.compact}</button>
-          <button className="gx-btn" onClick={() => compact ? setGridOnCompact((v) => !v) : setGridHidden((h) => !h)} aria-pressed={!gridOff}>{gridOff ? m.showGrid : m.hideGrid}</button>
+          <span className="gx-tb-spacer" />
+          <div className="gx-tb-group" role="group" aria-label={m.groupViewTools}>
+            <input className="gx-input gx-filter" type="search" aria-label={m.filterLabel} placeholder={m.filterLabel} value={vs.filter?.text ?? ''}
+              onKeyDown={(e) => e.stopPropagation()}
+              onChange={(e) => setVs({ ...vs, filter: { ...vs.filter, text: e.target.value } })} />
+            {findOpen
+              ? <FindBar inputRef={findInput} count={found.ids.length} index={found.i}
+                  onQuery={(q) => { const ids = findTasks(baseModel, q); setFound({ ids, i: ids.length ? 0 : -1 }); goFound(ids, 0); }}
+                  onStep={(d) => { const n = found.ids.length; if (!n) return; const i = (found.i + d + n) % n; setFound({ ids: found.ids, i }); goFound(found.ids, i); }}
+                  onClose={() => { setFindOpen(false); setFound({ ids: [], i: -1 }); }} />
+              : <button className="gx-btn" title={`${m.find} (Ctrl+F)`} onClick={openFind}>{m.find}</button>}
+            <button className="gx-btn" aria-haspopup="dialog" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPop({ kind: 'columns', x: r.left, y: r.bottom + 4 }); }}>{m.columns}</button>
+            <ViewPicker views={saved} current={viewId} onPick={pickView} onSave={saveView} onDelete={deleteView} />
+          </div>
+          <button className="gx-btn gx-icon-btn" aria-pressed={isFull} aria-label={isFull ? m.exitFullscreen : m.fullscreen} title={isFull ? m.exitFullscreen : m.fullscreen} onClick={toggleFullscreen}>
+            <span aria-hidden>{isFull ? '⤡' : '⤢'}</span></button>
           {props.saveState && <SaveIndicator state={props.saveState} />}
+          {(vs.sort || vs.groupBy || filterActive) && <div className="gx-tb-chips">
+            {vs.sort && <span className="gx-chip">{m.sortedBy(fieldLabel(vs.sort.field), vs.sort.dir)}<button className="gx-chip-x" aria-label={m.sortClear} onClick={() => setVs({ ...vs, sort: undefined })}>×</button></span>}
+            {vs.groupBy && <span className="gx-chip">{m.groupedBy(fieldLabel(vs.groupBy))}
+              <label className="gx-chip-opt"><input type="checkbox" checked={!!vs.groupLanes} onChange={(e) => setVs({ ...vs, groupLanes: e.target.checked || undefined })} /> {m.groupLanes}</label>
+              <button className="gx-chip-x" aria-label={m.ungroup} onClick={() => setVs({ ...vs, groupBy: undefined, groupLanes: undefined })}>×</button></span>}
+            {filterActive && <span className="gx-chip" role="status">{m.filtered(i18n.num(matchCount), i18n.num(baseModel.tasks.size))}<button className="gx-chip-x" aria-label={m.filterClear} onClick={() => setVs({ ...vs, filter: undefined })}>×</button></span>}
+          </div>}
         </div>
       )}
       {props.backlog && props.backlog.length > 0 && <Backlog items={props.backlog} />}
@@ -1667,8 +1701,14 @@ function GanttView(props: CoreProps & {
       {load && <LoadPanel load={load} scale={scale} labelWidth={chartBox.left} innerRef={loadInnerRef} chartWidth={chartWidth} chartVisible={chartBox.width} />}
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
-      {exportAt && <ContextMenu x={exportAt.x} y={exportAt.y} label={m.exportLabel} onClose={() => setExportAt(null)}
-        items={(['png', 'pdf', 'xlsx', 'csv', 'mspdi'] as const).map((f) => ({ label: m.exportAs[f], run: () => void exportAs(f) }))} />}
+      {exportAt && <ContextMenu x={exportAt.x} y={exportAt.y} label={m.fileMenu} onClose={() => setExportAt(null)}
+        items={[
+          { label: m.exportLabel, heading: true },
+          ...(['png', 'pdf', 'xlsx', 'csv', 'mspdi'] as const).map((f) => ({ label: m.exportAs[f], run: () => void exportAs(f) })),
+          { label: '', separator: true },
+          { label: m.importLabel, run: () => fileRef.current?.click() },
+        ]} />}
+      {showAt && <ContextMenu x={showAt.x} y={showAt.y} label={m.showMenu} onClose={() => setShowAt(null)} items={showItems} />}
       {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}
       {problemsAt && <Popover x={problemsAt.x} y={problemsAt.y} label={m.problemsTitle} onClose={() => setProblemsAt(null)}>
         <ProblemList doc={data} issues={analysis?.issues ?? []} why={whyNotFix} onFix={(f) => { commit({ type: 'batch', label: 'fix', ops: f.ops as DataOperation[] }); say(f.label); }}
@@ -1820,19 +1860,19 @@ function Tooltip({ setterRef }: { setterRef: React.RefObject<(s: TipState | null
   return tip ? <div className="gx-tooltip" role="tooltip" style={{ left: tip.x + 12, top: tip.y + 14 }}>{tip.content}</div> : null;
 }
 
-/** The built-in toolbar: zoom levels, Today, Fit, critical path and Schedule. */
-function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit, critical, setCritical, runSchedule, scheduleWhyNot }: ToolbarProps) {
+/**
+ * The built-in navigation group: zoom levels, Today and Fit. A host's `toolbar` replaces just this group; it
+ * still receives the critical-path and schedule controls, which the built-in row shows in its own groups.
+ */
+function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit }: ToolbarProps) {
   const { t: m } = useI18n();
   return (
-    <div className="gx-toolbar" role="toolbar" aria-label={m.toolbarLabel}>
+    <div className="gx-toolbar gx-tb-group" role="group" aria-label={m.groupNavigate}>
       <div className="gx-seg" role="radiogroup" aria-label={m.zoomLabel}>
         {levels.map((z) => <button key={z.id} role="radio" aria-checked={z.id === zoom} className={`gx-btn${z.id === zoom ? ' gx-on' : ''}`} onClick={() => setZoom(z.id)}>{m.zoomLevel[z.id] ?? z.label}</button>)}
       </div>
       <button className="gx-btn" onClick={scrollToToday}>{m.today}</button>
       <button className="gx-btn" onClick={fit}>{m.fit}</button>
-      <button className="gx-btn" aria-pressed={critical} onClick={() => setCritical(!critical)}>{m.criticalPath}</button>
-      <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? m.scheduleHint}
-        onClick={() => { if (!scheduleWhyNot) runSchedule(); }}>{m.schedule}{scheduleWhyNot && <span className="gx-sr">{scheduleWhyNot}</span>}</button>
     </div>
   );
 }

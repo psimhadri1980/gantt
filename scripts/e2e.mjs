@@ -47,6 +47,12 @@ async function runOnce(name, fn, quiet, retried = false) {
     if (!quiet) results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n').slice(0, 3).join('\n        ')}`);
   } finally { await page.close(); }
 }
+/** Switches an option in the toolbar's Show menu (critical path, slack, …) and closes the menu. */
+async function toggleShow(page, name) {
+  await page.getByRole('button', { name: /^Show( |$)/ }).click(); // "Show", or "Show 2 on" when options are on
+  await page.getByRole('menuitemcheckbox', { name, exact: true }).click();
+  await page.keyboard.press('Escape');
+}
 const expectEq = (a, b, what) => { if (a !== b) throw new Error(`${what}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); };
 const detailsTitle = (page) => page.locator('.gx-details h3').first().evaluate((h) => h.querySelector('input')?.value ?? h.textContent);
 const focusedText = (page) => page.evaluate(() => document.activeElement?.textContent ?? '');
@@ -275,7 +281,7 @@ await test('moving a task moves its successors in the same change, and a cycle i
 });
 
 await test('critical path highlighting and the Schedule button (C2, K1)', async (page) => {
-  await page.getByRole('button', { name: 'Critical path' }).click();
+  await toggleShow(page, 'Critical path');
   await page.locator('.gx-bar.gx-critical').first().waitFor();
   await page.getByRole('button', { name: /^Schedule/ }).click();
   await page.locator('.gx-toolbar-row [role="status"]', { hasText: /rescheduled|up to date/ }).waitFor();
@@ -622,7 +628,7 @@ await test('split tasks draw their pieces; slack is drawn as a bar extension (D1
   await depthSample(page);
   expectEq(await page.locator('.gx-bar[data-task="t8"] .gx-piece').count(), 2, 'two pieces');
   if (await page.locator('.gx-slack').count()) throw new Error('slack shown before asked');
-  await page.getByRole('button', { name: 'Slack', exact: true }).click();
+  await toggleShow(page, 'Slack');
   await page.locator('.gx-slack').first().waitFor();
 });
 
@@ -652,7 +658,7 @@ await test('a baseline renders under the current bars, with how the finish moved
 
 await test('S-curve totals match the data (B2)', async (page) => {
   await depthSample(page);
-  await page.getByRole('button', { name: 'S-curve' }).click();
+  await toggleShow(page, 'S-curve');
   await page.getByLabel('Baseline').selectOption({ label: 'Kick-off plan (v10)' });
   const shown = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-total]')].map((e) => [e.dataset.total, parseFloat(e.textContent)])));
   // The same totals, computed here from the data alone.
@@ -669,16 +675,16 @@ await test('S-curve totals match the data (B2)', async (page) => {
 
 await test('progress line on a chosen date marks tasks ahead and behind; rollups show children on summaries (B3, A5)', async (page) => {
   await depthSample(page);
-  await page.getByRole('button', { name: 'Progress line' }).click();
+  await toggleShow(page, 'Progress line');
   await page.getByLabel('Status date').fill('2026-12-01');
   await page.locator('.gx-progress-line circle.gx-pl-behind').first().waitFor();
-  await page.getByRole('button', { name: 'Rollups' }).click();
+  await toggleShow(page, 'Rollups');
   expectEq(await page.locator('.gx-bar[data-task="t6"] .gx-rollup').count(), 3, 'Core platform shows its three tasks');
 });
 
 // ---------- Phase 9: resources ----------
 async function staffedSample(page) { await page.goto('http://127.0.0.1:5192/?sample=resources'); await page.waitForSelector('.gx-bar[data-task="t7"]'); }
-const openLoad = (page) => page.getByRole('button', { name: 'Resources', exact: true }).click();
+const openLoad = (page) => toggleShow(page, 'Resources');
 
 await test('without resource data the load shows total demand per period, and per owner (E7)', async (page) => {
   await openLoad(page);
@@ -733,7 +739,7 @@ await test('a backlog item dragged onto the chart becomes a task there (D5)', as
 
 // ---------- Phase 10: interchange and platform ----------
 async function exportFile(page, label) {
-  await page.getByRole('button', { name: 'Export' }).click();
+  await page.getByRole('button', { name: 'File' }).click();
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: label }).click()]);
   const path = await dl.path();
   return { name: dl.suggestedFilename(), bytes: readFileSync(path) };

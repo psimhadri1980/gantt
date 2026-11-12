@@ -458,6 +458,10 @@ export interface GanttMessages {
   backlogHint: string;
   // interchange and platform (Phase 10)
   exportLabel: string;
+  /** Toolbar groups (accessible names) and menus. */
+  groupHistory: string; groupNavigate: string; groupPlanning: string; groupDisplay: string; groupViewTools: string;
+  showMenu: string; fileMenu: string; activeCount: (n: string) => string; taskTable: string;
+  groupAnalysis: string; groupTracking: string; groupResources: string; groupLayout: string;
   exportAs: Record<'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi', string>;
   importLabel: string;
   importHint: string;
