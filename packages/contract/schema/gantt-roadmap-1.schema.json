@@ -17,6 +17,7 @@
         "timeZone": { "$ref": "#/$defs/text", "description": "IANA time zone; task dates are in this zone." },
         "start": { "$ref": "#/$defs/date" },
         "defaultCalendar": { "$ref": "#/$defs/id" },
+        "defaultCapacityFte": { "type": "number", "minimum": 0, "description": "Capacity for people without resource data (E7)." },
         "statusDate": { "$ref": "#/$defs/date" }
       }
     },

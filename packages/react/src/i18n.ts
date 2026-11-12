@@ -285,6 +285,25 @@ export interface GanttMessages {
   saveBaseline: string;
   baselineName: string;
   baselineSaved: (name: string) => string;
+  // resources (Phase 9)
+  resourcesShow: string;
+  loadTitle: string;
+  totalDemand: string;
+  unassigned: string;
+  defaultDemandNote: string;
+  loadTip: (who: string, from: string, demand: string, capacity: string | null, overDays: string) => string;
+  levelResources: string;
+  levelled: (n: string) => string;
+  levelNothing: string;
+  levelUnresolved: (names: string) => string;
+  noAssignments: string;
+  assign: string;
+  unassign: (name: string) => string;
+  allocationOf: (name: string) => string;
+  assigned: (who: string, task: string) => string;
+  dragToAssign: string;
+  backlog: string;
+  backlogHint: string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -555,6 +574,24 @@ export const defaultMessages: GanttMessages = {
   saveBaseline: 'Save baseline',
   baselineName: 'Baseline name',
   baselineSaved: (n) => `Baseline “${n}” saved`,
+  resourcesShow: 'Resources',
+  loadTitle: 'Resource load',
+  totalDemand: 'Total demand',
+  unassigned: 'Unassigned',
+  defaultDemandNote: 'No resource data: each task counts as one person full time.',
+  loadTip: (w, f, d, c, o) => `${w}, from ${f}: ${d} person-days${c === null ? '' : ` of ${c} available`}${o !== '0' ? ` · over-allocated on ${o} days` : ''}`,
+  levelResources: 'Level resources',
+  levelled: (n) => `${n} tasks moved so nobody is over-allocated`,
+  levelNothing: 'Nobody is over-allocated',
+  levelUnresolved: (n) => `Could not fit: ${n}`,
+  noAssignments: 'Nobody assigned.',
+  assign: 'Assign',
+  unassign: (n) => `Unassign ${n}`,
+  allocationOf: (n) => `Share of ${n}’s time`,
+  assigned: (w, t) => `${w} assigned to ${t}`,
+  dragToAssign: 'Drag onto a bar to assign',
+  backlog: 'Backlog',
+  backlogHint: 'Drag onto the chart to plan it',
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 

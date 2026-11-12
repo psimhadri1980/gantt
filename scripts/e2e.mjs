@@ -260,9 +260,23 @@ await test('critical path highlighting and the Schedule button (C2, K1)', async 
 // ---------- Phase 5: editing on the chart ----------
 const taskStart = (page, id) => page.evaluate((i) => window.gantt.current.getData().tasks.find((t) => t.id === i)?.start, id);
 async function barBox(page, id) { const b = await page.locator(`.gx-bar[data-task="${id}"]`).boundingBox(); if (!b) throw new Error(`bar ${id} not visible`); return b; }
+/** Fails with what is there instead, when the point is not on the task's bar (layouts differ between machines). */
+async function assertOnBar(page, id, x, y) {
+  const what = await page.evaluate(({ id, x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(`.gx-bar[data-task="${id}"]`) ? null : `${el?.tagName}.${el?.className} (viewport ${innerWidth}×${innerHeight})`;
+  }, { id, x, y });
+  if (what) throw new Error(`(${Math.round(x)}, ${Math.round(y)}) is not on bar ${id}: ${what}`);
+}
 /** Scrolls to a task and waits until its bar stops moving (scrolling and redraws settle), so pointer coordinates are right. */
 async function scrollSettled(page, id) {
   await page.evaluate((i) => window.gantt.current.scrollToTask(i), id);
+  await page.waitForTimeout(400);
+  // Put the bar's start 60 px into the visible chart, so the whole bar is clear of the details panel on any machine.
+  await page.evaluate((i) => {
+    const c = document.querySelector('.gx-chart'), b = document.querySelector(`.gx-bar[data-task="${i}"]`);
+    if (c && b) c.scrollLeft += b.getBoundingClientRect().left - c.getBoundingClientRect().left - 60;
+  }, id);
   let last = '';
   for (let k = 0; k < 40; k++) {
     await page.waitForTimeout(100);
@@ -280,6 +294,7 @@ await test('drag a task: successors preview before release, the change applies t
   const px = await pxPerDay(page);
   const b = await barBox(page, 't7');
   const s7 = await taskStart(page, 't7'), s8 = await taskStart(page, 't8');
+  await assertOnBar(page, 't7', b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.down();
   await page.mouse.move(b.x + b.width / 2 + px * 3.1, b.y + b.height / 2, { steps: 8 });
@@ -312,6 +327,7 @@ await test('Esc cancels a drag, resize changes the duration, progress can be dra
   await page.waitForTimeout(200);
   expectEq(await taskStart(page, 't7'), s7, 'Esc cancels');
   b = await barBox(page, 't7');
+  await assertOnBar(page, 't7', b.x + b.width - 2, b.y + b.height / 2);
   await page.mouse.move(b.x + b.width - 2, b.y + b.height / 2); await page.mouse.down();
   await page.mouse.move(b.x + b.width - 2 + px * 2, b.y + b.height / 2, { steps: 5 }); await page.mouse.up();
   await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').duration === 10, null, { timeout: 8000 })
@@ -631,6 +647,61 @@ await test('progress line on a chosen date marks tasks ahead and behind; rollups
   await page.locator('.gx-progress-line circle.gx-pl-behind').first().waitFor();
   await page.getByRole('button', { name: 'Rollups' }).click();
   expectEq(await page.locator('.gx-bar[data-task="t6"] .gx-rollup').count(), 3, 'Core platform shows its three tasks');
+});
+
+// ---------- Phase 9: resources ----------
+async function staffedSample(page) { await page.goto('http://127.0.0.1:5192/?sample=resources'); await page.waitForSelector('.gx-bar[data-task="t7"]'); }
+const openLoad = (page) => page.getByRole('button', { name: 'Resources', exact: true }).click();
+
+await test('without resource data the load shows total demand per period, and per owner (E7)', async (page) => {
+  await openLoad(page);
+  await page.getByText('No resource data: each task counts as one person full time.').waitFor();
+  const labels = await page.locator('.gx-load-label').allTextContents();
+  if (labels[0] !== 'Total demand' || labels.length < 2) throw new Error(`rows: ${labels.join(' | ')}`);
+  if (!(await page.locator('.gx-load-cell[data-row="total"]').count())) throw new Error('no demand bars');
+  if (await page.locator('.gx-load-cell[data-over]').count()) throw new Error('over-allocation shown without any capacity');
+});
+
+await test('with assignments the load is per resource, over-allocation highlighted against capacity (E3, E4, E5)', async (page) => {
+  await staffedSample(page);
+  await openLoad(page);
+  expectEq((await page.locator('.gx-load-label').allTextContents()).join(' | '), '⠿Pat · 1 FTE | ⠿Sam · 1 FTE | ⠿Kim (part-time) · 0.6 FTE | Unassigned', 'rows');
+  await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().waitFor();
+  const tip = await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().getAttribute('title');
+  if (!/over-allocated on \d+ days/.test(tip)) throw new Error(tip);
+});
+
+await test('assign in the details panel and by dragging a person onto a bar (E1, E2)', async (page) => {
+  await staffedSample(page);
+  await row(page, 'Requirements').click();
+  await page.locator('.gx-details').getByRole('combobox', { name: 'Assign' }).selectOption({ label: 'Pat' });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't2').resources.some((r) => r.id === 'pat'));
+  await page.locator('.gx-details').getByRole('spinbutton', { name: 'Share of Pat’s time' }).fill('50');
+  await page.locator('.gx-details').getByRole('spinbutton', { name: 'Share of Pat’s time' }).press('Enter');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't2').resources.find((r) => r.id === 'pat').allocation === 0.5);
+  await openLoad(page);
+  await scrollSettled(page, 't3');
+  await page.locator('.gx-load-label', { hasText: 'Kim' }).dragTo(page.locator('.gx-bar[data-task="t3"]'));
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't3').resources.some((r) => r.id === 'kim'));
+});
+
+await test('levelling removes over-allocation in one undoable change (E6)', async (page) => {
+  await staffedSample(page);
+  await openLoad(page);
+  await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().waitFor();
+  await page.getByRole('button', { name: 'Level resources' }).click();
+  await page.getByText(/tasks moved so nobody is over-allocated/).first().waitFor();
+  await page.waitForFunction(() => !document.querySelector('.gx-load-cell[data-over]'));
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.locator('.gx-load-cell[data-row="r:pat"][data-over]').first().waitFor();
+});
+
+await test('a backlog item dragged onto the chart becomes a task there (D5)', async (page) => {
+  await staffedSample(page);
+  await scrollSettled(page, 't16');
+  await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).dragTo(page.locator('.gx-chart'), { targetPosition: { x: 300, y: await page.evaluate(() => { const c = document.querySelector('.gx-chart').getBoundingClientRect(); const r = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task="t15"]')][0].getBoundingClientRect(); return r.top - c.top + r.height / 2; }) } });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.some((t) => t.name === 'Load testing' && t.parent === 't15' && t.duration === 3));
+  await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).waitFor({ state: 'detached' });
 });
 
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------

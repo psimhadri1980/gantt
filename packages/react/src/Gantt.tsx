@@ -7,7 +7,7 @@ import {
   copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
   type GanttViewState, type SavedView, type TreeClipboard,
 } from '@gantt/state';
-import { fixesFor, fromDay, place, progressLine, schedule, sCurve, toDay, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
+import { fixesFor, fromDay, levelResources, place, progressLine, resourceLoad, schedule, sCurve, toDay, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
 import { checkChange, type AccessEvaluator } from '@gantt/access';
 import { placeOffThread, scheduleOffThread } from './engineClient.ts';
 import { DragController, type DragKind } from './drag.ts';
@@ -19,6 +19,7 @@ import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBloc
 import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
 import type { PlacedTask } from '@gantt/engine';
 import { ProgressLineLayer, SCurveChart } from './tracking.tsx';
+import { Backlog, LoadPanel, type BacklogItem } from './resources.tsx';
 import './gantt.css';
 
 export interface GanttProps {
@@ -95,6 +96,9 @@ export interface GanttProps {
   tooltipTemplate?: ComponentType<{ task: Task; placed: PlacedTask; Default: ReactNode }>;
   /** Compact mode for small screens (F5): `'auto'` (default) switches it on below 720 px. */
   compact?: boolean | 'auto';
+  /** Unplanned work to drag onto the chart (D5); `onBacklogUsed` tells the host which item became which task. */
+  backlog?: BacklogItem[];
+  onBacklogUsed?: (item: BacklogItem, taskId: string) => void;
   /** Scale boundaries (G3): fixed dates; each side left out follows the data with some margin (flexible). */
   scaleRange?: { start?: string; end?: string };
 }
@@ -373,6 +377,8 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
       .finally(() => loadingRef.current.delete(id));
   }, []);
   const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(null);
+  /** The working document as it is now; the rendered one may lag while the engine places a change. */
+  const latestDoc = useCallback(() => docRef.current, []);
   const [failure, setFailure] = useState<{ doc: RoadmapDocument; message: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => { setFailure(null); setAttempt((a) => a + 1); }, []);
@@ -398,7 +404,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
   }
   return (
     <ViewBoundary key={attempt} fallback={(message) => <ErrorState {...props} message={message} retry={retry} themeAttr={themeAttr} />}>
-      <GanttView {...props} data={built.data} model={built.model} run={run} viewRef={viewRef} loadState={loadState} requestChildren={requestChildren} history={history} />
+      <GanttView {...props} data={built.data} model={built.model} latestDoc={latestDoc} run={run} viewRef={viewRef} loadState={loadState} requestChildren={requestChildren} history={history} />
     </ViewBoundary>
   );
 });
@@ -432,7 +438,7 @@ function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> 
 }
 
 function GanttView(props: CoreProps & {
-  model: Model; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
+  model: Model; latestDoc: () => RoadmapDocument; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
   loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
   history: { undo: () => Promise<OperationResult | null>; redo: () => Promise<OperationResult | null>; canUndo: boolean; canRedo: boolean };
 }) {
@@ -511,6 +517,7 @@ function GanttView(props: CoreProps & {
   }, []);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
+  const loadInnerRef = useRef<HTMLDivElement>(null);
   // b0..b1 and c0..c1 include the overscan margin; v0..v1 and t0..t1 are what is actually on screen.
   const [view, setView] = useState({ b0: 0, b1: 1, c0: 0, c1: 1, v0: 0, v1: 1, t0: 0, t1: 1, h: 600 });
   // Right after a zoom only what is on screen is redrawn; the margin follows in a later task, so the
@@ -544,6 +551,7 @@ function GanttView(props: CoreProps & {
     const st = el.scrollTop, sl = el.scrollLeft; // reads first …
     if (gridBodyRef.current) gridBodyRef.current.scrollTop = st; // … then writes
     if (headerRef.current) headerRef.current.scrollLeft = sl;
+    if (loadInnerRef.current) loadInnerRef.current.style.transform = `translateX(${-sl}px)`;
     measure(st, sl);
   }, [measure]);
   useLayoutEffect(() => { measure(); }, [measure, rows, scale]);
@@ -760,6 +768,9 @@ function GanttView(props: CoreProps & {
   const [plDate, setPlDate] = useState<string | null>(null);
   const [showRollups, setShowRollups] = useState(false);
   const [showSCurve, setShowSCurve] = useState(false);
+  // Resources (Phase 9): the load panel, levelling, assignment by drag and drop, the backlog.
+  const [showLoad, setShowLoad] = useState(false);
+  const [chartBox, setChartBox] = useState({ left: 0, width: 0 });
   const critical = useMemo(() => (showCritical && analysis ? new Set([...analysis.tasks].filter(([, t]) => t.critical).map(([id]) => id)) : null), [showCritical, analysis]);
   const criticalLinks = useMemo(() => {
     if (!critical || !analysis) return null;
@@ -847,6 +858,9 @@ function GanttView(props: CoreProps & {
     if (ops.length) { commit(ops.length === 1 ? ops[0]! : { type: 'batch', ops }); select([]); }
   };
   // ---------- Tree editing (D2, D3, D4, D15, D16) ----------
+  // Tree edits read the tree as it is now, not as last drawn: two quick edits in a row (indent, then
+  // outdent) must each see the result of the one before. Positions come from the drawn placement.
+  const treeModel = (): Model => { const d = props.latestDoc(); return d === baseModel.doc ? baseModel : buildModel(d, baseModel.placement); };
   type TreeOut = { ops: DataOperation[]; ids?: string[] } | { error: string };
   const runTree = (r: TreeOut, label: string, after?: (ids?: string[]) => void) => {
     if ('error' in r) { say(r.error); return; }
@@ -857,6 +871,7 @@ function GanttView(props: CoreProps & {
   const selectedTasks = (): string[] => editTargets().filter((id) => !isGroupId(id) && baseModel.tasks.has(id));
   const whyNotMove = (ids: string[]) => ids.map((id) => whyNotEdit(id, 'parent')).find((w) => w) ?? null;
   const addTask = (parent: string | null, index: number, name?: string, near?: string) => {
+    const baseModel = treeModel();
     const why = whyNotCreate(parent ?? ''); if (why) { say(why); return; }
     const ref = near ? baseModel.placement.byId.get(near) : undefined;
     const cal = baseModel.placement.calendar;
@@ -869,12 +884,14 @@ function GanttView(props: CoreProps & {
     });
   };
   const addBelow = (id: string) => {
+    const baseModel = treeModel();
     const t = baseModel.tasks.get(id); if (!t) return;
     const sibs = baseModel.children.get(t.parent) ?? [];
     addTask(t.parent, sibs.indexOf(id) + 1, undefined, id);
   };
-  const addChild = (id: string) => addTask(id, baseModel.children.get(id)?.length ?? 0, undefined, id);
+  const addChild = (id: string) => addTask(id, treeModel().children.get(id)?.length ?? 0, undefined, id);
   const addFromPlaceholder = (name: string) => {
+    const baseModel = treeModel();
     // Quick entry (D4): at the end of the selected summary, else at the end of the top level.
     const p = selection[selection.length - 1];
     const into = p && p.type === 'row' && (baseModel.children.get(p.taskId)?.length ?? 0) > 0 ? p.taskId : null;
@@ -882,6 +899,7 @@ function GanttView(props: CoreProps & {
   };
   const clip = useRef<{ clip: TreeClipboard; cut: boolean } | null>(null);
   const copySel = (cut: boolean) => {
+    const baseModel = treeModel();
     const ids = selectedTasks(); if (!ids.length) return;
     if (cut) { const why = whyNotMove(ids); if (why) { say(why); return; } }
     const c = copyTasks(baseModel, ids);
@@ -891,12 +909,14 @@ function GanttView(props: CoreProps & {
   };
   /** Where a paste or duplicate lands: after the selected task, among its siblings; else at the end. */
   const pastePlace = (): { parent: string | null; index: number } => {
+    const baseModel = treeModel();
     const p = selectedTasks().at(-1);
     const t = p ? baseModel.tasks.get(p) : undefined;
     if (!t) return { parent: null, index: baseModel.children.get(null)?.length ?? 0 };
     return { parent: t.parent, index: (baseModel.children.get(t.parent) ?? []).indexOf(t.id) + 1 };
   };
   const pasteSel = () => {
+    const baseModel = treeModel();
     const c = clip.current; if (!c) { say(m.nothingToPaste); return; }
     const { parent, index } = pastePlace();
     if (c.cut) {
@@ -912,17 +932,20 @@ function GanttView(props: CoreProps & {
     });
   };
   const duplicateSel = () => {
+    const baseModel = treeModel();
     const ids = selectedTasks(); if (!ids.length) return;
     const why = whyNotCreate(''); if (why) { say(why); return; }
     runTree(duplicateOps(baseModel, ids, () => newId()), 'duplicate', (n) => { if (n?.length) select(n.map((id) => ({ type: 'row' as const, taskId: id }))); });
   };
   const indentSel = (out: boolean) => {
+    const baseModel = treeModel();
     const ids = selectedTasks(); if (!ids.length) return;
     const why = whyNotMove(ids); if (why) { say(why); return; }
     runTree(out ? outdentOps(baseModel, ids) : indentOps(baseModel, ids), out ? 'outdent' : 'indent', () => { for (const id of ids) scrollToTask(id); });
   };
   /** Dragging rows in the grid by their WBS cell (D2): before or after a row, or onto it to make it the parent. */
   const rowPointerDown = (e: React.PointerEvent, _i: number, id: string) => {
+    const baseModel = treeModel();
     if (e.button !== 0 || !(e.target as HTMLElement).closest('.gx-grip') || isGroupId(id)) return;
     const body = gridBodyRef.current; if (!body) return;
     const ids = selKeys.has(`row:${id}`) ? selectedTasks() : [id];
@@ -986,6 +1009,47 @@ function GanttView(props: CoreProps & {
       select(out); say(m.selectedBars(i18n.num(out.length)));
     };
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  };
+
+  /** Resource levelling (E6) as one undoable change. */
+  const levelRes = () => {
+    const r = levelResources(dataRef.current);
+    const names = r.unresolved.map((id) => baseModel.tasks.get(id)?.name ?? id).join(', ');
+    if (!r.changes.length) { say(r.unresolved.length ? m.levelUnresolved(names) : m.levelNothing); return; }
+    void run({ type: 'batch', label: 'level', ops: r.changes.map((c) => ({ type: 'task.update' as const, id: c.id, fields: c.fields })) }, 'user')
+      .then((x) => say(!x.ok ? x.reason : m.levelled(i18n.num(r.changes.length)) + (r.unresolved.length ? ` · ${m.levelUnresolved(names)}` : '')));
+  };
+  /** Drops on the chart: a resource onto a bar assigns it (E2); a backlog item becomes a task there (D5). */
+  const onChartDrop = (e: React.DragEvent) => {
+    const rid = e.dataTransfer.getData('application/x-gantt-resource');
+    const bid = e.dataTransfer.getData('application/x-gantt-backlog');
+    if (!rid && !bid) return;
+    e.preventDefault();
+    if (rid) {
+      const bar = (e.target as HTMLElement).closest<HTMLElement>('.gx-bar[data-task]');
+      const id = bar?.dataset.task; const t = id ? baseModel.tasks.get(id) : undefined;
+      if (!t || t.type !== 'task' || (baseModel.children.get(t.id)?.length ?? 0) > 0) return;
+      const why = whyNotEdit(t.id, 'resources'); if (why) { say(why); return; }
+      if (t.resources?.some((a) => a.id === rid)) return;
+      commit({ type: 'task.update', id: t.id, fields: { resources: [...(t.resources ?? []), { id: rid, allocation: 1 }] } });
+      say(m.assigned(data.resources?.find((r) => r.id === rid)?.name ?? rid, t.name));
+      return;
+    }
+    const item = props.backlog?.find((b) => b.id === bid); if (!item) return;
+    const why = whyNotCreate(''); if (why) { say(why); return; }
+    const canvas = canvasRef.current!.getBoundingClientRect();
+    const day = Math.floor((e.clientX - canvas.left) / scale.pxPerDay) + scale.origin;
+    const rs = geom.current.rows; const k = rowAt(rs, e.clientY - canvas.top); const row = rs[k];
+    const at = row ? baseModel.tasks.get(row.taskId) : undefined;
+    // Onto a summary or lane: inside it. Onto a task: after it, among its siblings. Below the rows: at the end.
+    const parent = at && (row!.lane || (baseModel.children.get(at.id)?.length ?? 0) > 0 || at.type === 'summary') ? at.id : at?.parent ?? null;
+    const sibs = baseModel.children.get(parent) ?? [];
+    const index = at && parent !== at.id ? sibs.indexOf(at.id) + 1 : sibs.length;
+    const id = newId();
+    const cal = baseModel.placement.calendar;
+    runTree(newTaskOps(baseModel, parent, index, { id, name: item.name, type: 'task', kind: item.kind, start: fromDay(cal.nextWorking(day)), duration: item.duration ?? 1 }), 'backlog', () => {
+      props.onBacklogUsed?.(item, id); select([{ type: 'row', taskId: id }]);
+    });
   };
 
   // Drawing a dependency with the keyboard (F9): L on the predecessor, then Enter on the successor.
@@ -1312,6 +1376,13 @@ function GanttView(props: CoreProps & {
   const longVisible = useMemo(() => linkBuckets.long.filter((x) => x.b1 >= lb0 && x.b0 < lb1).map((x) => x.l), [linkBuckets, lb0, lb1]);
 
   const statusDay = plDate ? toDay(plDate) : todayDay;
+  const loadPeriod = level.pxPerDay >= 40 ? 'day' as const : level.pxPerDay >= 8 ? 'week' as const : 'month' as const;
+  const load = useMemo(() => (showLoad ? resourceLoad(data, baseModel.placement, { period: loadPeriod }) : null), [showLoad, data, baseModel, loadPeriod]);
+  useLayoutEffect(() => {
+    const c = chartRef.current, r = rootRef.current; if (!showLoad || !c || !r) return;
+    const upd = () => { const a = c.getBoundingClientRect(), b = r.getBoundingClientRect(); setChartBox((x) => (x.left === a.left - b.left && x.width === c.clientWidth ? x : { left: a.left - b.left, width: c.clientWidth })); if (loadInnerRef.current) loadInnerRef.current.style.transform = `translateX(${-c.scrollLeft}px)`; };
+    upd(); const ro = new ResizeObserver(upd); ro.observe(c); return () => ro.disconnect();
+  }, [showLoad, gridW, gridOff, load]);
   const plPoints = useMemo(() => (showPL ? progressLine(baseModel.placement, statusDay) : null), [showPL, baseModel, statusDay]);
   const curve = useMemo(() => (showSCurve ? sCurve(baseModel.placement, statusDay, chosenBaseline) : null), [showSCurve, baseModel, statusDay, chosenBaseline]);
   if (data.tasks.length === 0) {
@@ -1343,6 +1414,8 @@ function GanttView(props: CoreProps & {
             <input className="gx-input" type="date" value={fromDay(statusDay)} onChange={(e) => setPlDate(e.target.value || null)} onKeyDown={(e) => e.stopPropagation()} /></label>}
           <button className="gx-btn" aria-pressed={showRollups} onClick={() => setShowRollups((v) => !v)}>{m.rollups}</button>
           <button className="gx-btn" aria-pressed={showSCurve} aria-expanded={showSCurve} onClick={() => setShowSCurve((v) => !v)}>{m.sCurve}</button>
+          <button className="gx-btn" aria-pressed={showLoad} aria-expanded={showLoad} onClick={() => setShowLoad((v) => !v)}>{m.resourcesShow}</button>
+          {(data.resources?.length ?? 0) > 0 && <button className="gx-btn" aria-disabled={!!scheduleWhyNot || undefined} title={scheduleWhyNot ?? undefined} onClick={() => { if (!scheduleWhyNot) levelRes(); }}>{m.levelResources}</button>}
           <button className={`gx-btn${analysis?.issues.length ? ' gx-warn-btn' : ''}`} aria-haspopup="dialog" aria-expanded={!!problemsAt}
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setProblemsAt(problemsAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.problems(i18n.num(analysis?.issues.length ?? 0))}</button>
           <button className="gx-btn" aria-disabled={!props.history.canUndo || undefined} title={props.history.canUndo ? `${m.undo} (Ctrl+Z)` : m.nothingToUndo} onClick={() => void props.history.undo()}>{m.undo}</button>
@@ -1370,6 +1443,7 @@ function GanttView(props: CoreProps & {
           {props.saveState && <SaveIndicator state={props.saveState} />}
         </div>
       )}
+      {props.backlog && props.backlog.length > 0 && <Backlog items={props.backlog} />}
       {curve && <div className="gx-scurve" role="region" aria-label={m.sCurve}><SCurveChart curve={curve} statusDay={statusDay} baselineName={chosenBaseline?.name} /></div>}
       <div className="gx-main">
         <div className="gx-panes">
@@ -1438,6 +1512,8 @@ function GanttView(props: CoreProps & {
                 else if (link) { e.preventDefault(); openMenu(e.clientX, e.clientY, { type: 'link', linkId: link.dataset.link! }); }
               }}
               onKeyDown={(e) => { if (editKeys(e)) e.preventDefault(); }}
+              onDragOver={(e) => { const ty = e.dataTransfer.types; if (ty.includes('application/x-gantt-resource') || ty.includes('application/x-gantt-backlog')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
+              onDrop={onChartDrop}
               onPointerLeave={() => { if (!drag.active) pan.current = null; }}>
               <div className="gx-canvas" ref={canvasRef} style={{ width: chartWidth, height: H + sizes.row }}>
                 <div className="gx-window" style={{ top: win.y, height: win.h }}>
@@ -1472,6 +1548,7 @@ function GanttView(props: CoreProps & {
           return compact ? <div className="gx-sheet"><button className="gx-btn gx-small gx-sheet-close" aria-label={m.closePanel} onClick={() => select([])}>×</button>{panel}</div> : panel;
         })()}
       </div>
+      {load && <LoadPanel load={load} scale={scale} labelWidth={chartBox.left} innerRef={loadInnerRef} chartWidth={chartWidth} chartVisible={chartBox.width} />}
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
       {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}

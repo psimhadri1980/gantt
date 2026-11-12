@@ -16,7 +16,7 @@ export function isIsoDate(v: unknown): v is string {
 
 const KNOWN: Record<string, string[]> = {
   root: ['contract', 'roadmap', 'calendars', 'tasks', 'links', 'resources', 'proposals', 'access', 'baselines'],
-  roadmap: ['id', 'name', 'version', 'timeZone', 'start', 'defaultCalendar', 'statusDate'],
+  roadmap: ['id', 'name', 'version', 'timeZone', 'start', 'defaultCalendar', 'statusDate', 'defaultCapacityFte'],
   calendar: ['id', 'name', 'workingDays', 'hoursPerDay', 'holidays'],
   task: ['id', 'name', 'type', 'parent', 'kind', 'lane', 'order', 'start', 'duration', 'durationUnit', 'end', 'progress',
     'mode', 'owner', 'resources', 'constraint', 'deadline', 'hasChildren', 'calendar', 'splits'],
@@ -90,7 +90,7 @@ export function validate(input: unknown): ValidationResult {
   else {
     str(rm, 'id', 'roadmap'); str(rm, 'name', 'roadmap'); str(rm, 'timeZone', 'roadmap');
     if (!Number.isInteger(rm.version)) err('roadmap.version', 'must be an integer');
-    date(rm, 'start', 'roadmap', true); date(rm, 'statusDate', 'roadmap');
+    date(rm, 'start', 'roadmap', true); date(rm, 'statusDate', 'roadmap'); num(rm, 'defaultCapacityFte', 'roadmap', 0);
     unknown(rm, KNOWN.roadmap!, 'roadmap');
   }
 

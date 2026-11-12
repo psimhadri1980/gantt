@@ -20,6 +20,8 @@ export interface Roadmap {
   start: IsoDate;
   defaultCalendar?: string;
   statusDate?: IsoDate;
+  /** Capacity in FTE that people without resource data are measured against (E7); omit for none. */
+  defaultCapacityFte?: number;
 }
 
 export interface Calendar {

@@ -41,7 +41,21 @@ const BarTemplate = ({ task, placed }: { task: { name: string }; placed: { progr
 const TooltipTemplate = ({ task, Default }: { task: { owner?: string }; Default: ReactNode }) =>
   <>{Default}<div className="demo-tip-tpl">Owner: {task.owner ?? 'nobody'}</div></>;
 
-type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid' | 'depth';
+type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid' | 'depth' | 'resources';
+
+// Resources (Phase 9): three people, one part-time on a Mon–Wed calendar, assigned so that Pat is
+// over-allocated in the build; and a backlog to drag onto the chart.
+const assignments: Record<string, { id: string; allocation: number }[]> = {
+  t2: [{ id: 'sam', allocation: 1 }], t3: [{ id: 'pat', allocation: 0.5 }], t7: [{ id: 'pat', allocation: 1 }],
+  t8: [{ id: 'pat', allocation: 1 }], t9: [{ id: 'pat', allocation: 1 }, { id: 'kim', allocation: 0.5 }], t16: [{ id: 'sam', allocation: 1 }],
+};
+const staffed = {
+  ...small,
+  calendars: [...(small.calendars ?? []), { id: 'mtw', name: 'Mon–Wed', workingDays: [1, 2, 3], hoursPerDay: 8 }],
+  resources: [{ id: 'pat', name: 'Pat', capacityFte: 1 }, { id: 'sam', name: 'Sam', capacityFte: 1 }, { id: 'kim', name: 'Kim (part-time)', capacityFte: 0.6, calendar: 'mtw' }],
+  tasks: small.tasks.map((t) => (assignments[t.id] ? { ...t, resources: assignments[t.id] } : t)),
+};
+const backlogItems = [{ id: 'bk1', name: 'Load testing', duration: 3 }, { id: 'bk2', name: 'Security review', duration: 2 }, { id: 'bk3', name: 'Docs update', duration: 1 }];
 
 // Scheduling depth (Phase 7): a task calendar, a split task, hour-based tasks, constraints and a deadline that
 // are broken (so the Problems list has something to fix), and an inactive task.
@@ -95,6 +109,7 @@ function App() {
   const [readOnly, setReadOnly] = useState(false);
   const [failSave, setFailSave] = useState(false);
   const [lang, setLang] = useState<'en' | 'de'>('en');
+  const [backlog, setBacklog] = useState(backlogItems);
   const [save, setSave] = useState<{ status: 'saving' | 'saved' | 'error'; reason?: string } | undefined>();
   // Simulated persistence: every data change is "saved" after a short delay, or fails when asked to.
   const onDataChanged = () => {
@@ -110,6 +125,7 @@ function App() {
     const t0 = performance.now();
     const input = sample === 'small' ? small
       : sample === 'depth' ? depth
+      : sample === 'resources' ? staffed
       : sample === 'invalid' ? { ...small, tasks: [...small.tasks.slice(0, 11), { ...small.tasks[11], start: 'soon' }, ...small.tasks.slice(12)] }
       : generate({ tasks: 10000, linkDensity: 0.55, laneEvery: sample === 'lanes' ? 2 : 0 });
     if (sample === 'lazy') {
@@ -131,6 +147,7 @@ function App() {
           <option value="large">Large (10,000 tasks)</option>
           <option value="lanes">Large as lanes</option>
           <option value="lazy">Children loaded on expand</option>
+          <option value="resources">Resources (people, load, backlog)</option>
           <option value="depth">Scheduling depth (hours, splits, problems)</option>
           <option value="invalid">Invalid file</option>
         </select></label>
@@ -177,6 +194,7 @@ function App() {
             markers={[{ date: '2026-12-18', label: 'Code freeze' }]} userId="demo-user"
             readOnly={readOnly} saveState={save} onDataChanged={onDataChanged} loadChildren={result.loadChildren}
             zoomLevels={sample === 'depth' ? depthLevels : undefined}
+            backlog={sample === 'resources' ? backlog : undefined} onBacklogUsed={(it) => setBacklog((b) => b.filter((x) => x.id !== it.id))}
             scaleRange={sample === 'depth' ? { start: '2026-10-26' } : undefined}
             columns={withTemplates ? hostColumns : undefined} barTemplate={withTemplates ? BarTemplate : undefined} tooltipTemplate={withTemplates ? TooltipTemplate : undefined}
             locale={lang === 'de' ? 'de-DE' : undefined} messages={lang === 'de' ? german : undefined}
