@@ -1,5 +1,6 @@
 import { validate, type Issue, type RoadmapDocument } from '@gantt/contract';
 import { place } from '@gantt/engine';
+import { fullAccess } from '@gantt/access';
 export { generate, type GenerateOptions } from './generate.ts';
 
 export type LoadResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[]; warnings: Issue[] };
@@ -17,7 +18,10 @@ export function loadMock(input: string | unknown): LoadResult {
   if (!r.ok) return r;
   const p = place(r.doc);
   if (p.errors.length) return { ok: false, errors: p.errors, warnings: [...r.warnings, ...p.warnings] };
-  return { ok: true, doc: r.doc, warnings: [...r.warnings, ...p.warnings] };
+  // Mock mode only: a file without access rules is full access for the mock user, the one exception to
+  // the safe default (section 3b). Everywhere else no rules means no access (L8).
+  const doc = r.doc.access ? r.doc : { ...r.doc, access: fullAccess() as RoadmapDocument['access'] };
+  return { ok: true, doc, warnings: [...r.warnings, ...p.warnings] };
 }
 
 /** Export the current state back to JSON in the same contract (M8). */

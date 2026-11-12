@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Gantt } from './index.ts';
 import type { RoadmapDocument } from '@gantt/contract';
+import { fullAccess } from '@gantt/access';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 Element.prototype.scrollTo ??= function () {} as typeof Element.prototype.scrollTo;
@@ -12,6 +13,7 @@ globalThis.ResizeObserver ??= class { observe() {} disconnect() {} unobserve() {
 const base: RoadmapDocument = {
   contract: 'gantt-roadmap/1', roadmap: { id: 'r', name: 'R', version: 1, timeZone: 'UTC', start: '2026-11-02' },
   tasks: [{ id: 'a', name: 'Alpha', type: 'task', parent: null, start: '2026-11-02', duration: 3 }], links: [],
+  access: fullAccess('tester') as RoadmapDocument['access'],
 };
 const mounted: (() => void)[] = [];
 afterEach(async () => { for (const u of mounted.splice(0)) await act(async () => u()); });

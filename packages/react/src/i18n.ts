@@ -105,6 +105,35 @@ export interface GanttMessages {
   roadmapVersion: (v: string) => string;
   openProposals: string;
   keyboardHint: string;
+  diffAdded: string;
+  diffChanged: string;
+  editHint: string;
+  // access (L6)
+  noAccess: string;
+  // Proposals (section K)
+  proposalBar: string;
+  viewLabel: string;
+  currentView: (version: string) => string;
+  currentNone: string;
+  versionView: (version: string, by: string, date: string) => string;
+  proposalOption: (name: string, state: string, owner: string) => string;
+  state: Record<string, string>;
+  expires: (date: string, phase: string) => string;
+  phaseName: Record<string, string>;
+  changesCount: (n: string) => string;
+  stale: string;
+  compare: string;
+  history: string;
+  action: Record<'submit' | 'withdraw' | 'review' | 'approve' | 'return' | 'reject' | 'discard' | 'newFrom', string>;
+  reasonLabel: string;
+  confirm: string;
+  cancel: string;
+  chooseTarget: string;
+  newProposal: string;
+  versionReadOnly: string;
+  closedReadOnly: (state: string) => string;
+  returnedReason: (reason: string) => string;
+  historyEntry: (who: string, action: string, date: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -203,6 +232,33 @@ export const defaultMessages: GanttMessages = {
   span: 'Span',
   roadmapVersion: (v) => `Roadmap · version ${v}`,
   openProposals: 'Open proposals',
+  diffAdded: 'New',
+  diffChanged: 'Changed',
+  editHint: 'Changes are saved in a Proposal; Current changes only when it is approved.',
+  noAccess: 'You do not have access to this roadmap.',
+  proposalBar: 'Roadmap Proposals',
+  viewLabel: 'Showing',
+  currentView: (v) => `Current (version ${v})`,
+  currentNone: 'Current (nothing approved yet)',
+  versionView: (v, by, d) => `Version ${v}, approved by ${by} on ${d}`,
+  proposalOption: (name, state, owner) => `${name} · ${state} · ${owner}`,
+  state: { Draft: 'Draft', Returned: 'Returned', Submitted: 'Submitted', Reviewed: 'Reviewed', Approved: 'Approved', Rejected: 'Rejected', Expired: 'Expired', Discarded: 'Discarded' },
+  expires: (d, phase) => `Expires ${d} (${phase})`,
+  phaseName: { preparing: 'draft lifetime', review: 'review limit', approval: 'approval limit' },
+  changesCount: (n) => `${n} changes`,
+  stale: 'Current has changed',
+  compare: 'Compare with Current',
+  history: 'History',
+  action: { submit: 'Submit', withdraw: 'Withdraw', review: 'Mark reviewed', approve: 'Approve', return: 'Return…', reject: 'Reject…', discard: 'Discard', newFrom: 'New Proposal from this' },
+  reasonLabel: 'Reason',
+  confirm: 'Confirm',
+  cancel: 'Cancel',
+  chooseTarget: 'Save this change in:',
+  newProposal: 'A new Proposal',
+  versionReadOnly: 'Earlier versions are read-only',
+  closedReadOnly: (state) => `The Proposal is ${state} and cannot be changed`,
+  returnedReason: (r) => `Returned: ${r}`,
+  historyEntry: (who, action, date) => `${date} · ${who} · ${action}`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
@@ -214,6 +270,9 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     childState: { ...defaultMessages.childState, ...over.childState },
     linkSentence: { ...defaultMessages.linkSentence, ...over.linkSentence },
     linkType: { ...defaultMessages.linkType, ...over.linkType },
+    state: { ...defaultMessages.state, ...over.state },
+    phaseName: { ...defaultMessages.phaseName, ...over.phaseName },
+    action: { ...defaultMessages.action, ...over.action },
   };
 }
 

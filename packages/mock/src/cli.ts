@@ -1,4 +1,4 @@
-declare const process: { argv: string[]; stdout: { write(s: string): void } };
+
 // npm run generate -- --tasks 10000 --links 0.5 --depth 3 --lanes 0 > big.json
 import { generate } from './generate.ts';
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? Number(process.argv[i + 1]) : d; };

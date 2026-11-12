@@ -1,6 +1,8 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Gantt, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
+import { Gantt, memoryBackend, type AccessRules, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
+import { RoadmapService } from '@gantt/service';
+import roles from '../../../packages/mock/src/samples/roles.json';
 import { generate, loadMock, splitForLazyLoading } from '@gantt/mock';
 import small from '../../../packages/mock/src/samples/small.json';
 import './demo.css';
@@ -28,9 +30,25 @@ const german: Partial<GanttMessages> = {
   readOnly: 'Das Diagramm ist schreibgeschützt',
 };
 
-type SampleId = 'small' | 'large' | 'lanes' | 'lazy' | 'invalid';
+type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid';
+const rules = roles as Record<string, AccessRules>;
+const DAY = 86_400_000;
+const USERS: [string, string][] = [['alice', 'Alice (planner)'], ['bob', 'Bob (reviewer)'], ['carol', 'Carol (approver)'], ['dave', 'Dave (progress only)'],
+  ['erin', 'Erin (viewer, no crews)'], ['frank', 'Frank (admin)'], ['mallory', 'Mallory (no access)']];
 function App() {
-  const [sample, setSample] = useState<SampleId>('small');
+  const [sample, setSample] = useState<SampleId>(() => (new URLSearchParams(location.search).get('sample') as SampleId) || 'small');
+  // Proposal workflow on a mock backend (M7): one service per separation-of-duties setting, with a clock the demo can move.
+  const [user, setUser] = useState('alice');
+  const [sod, setSod] = useState(true);
+  const clock = useRef(Date.parse('2026-11-11T09:00:00Z'));
+  const [clockLabel, setClockLabel] = useState(new Date(clock.current).toISOString().slice(0, 10));
+  const svc = useMemo(() => {
+    const r = loadMock(small);
+    if (!r.ok) throw new Error('sample invalid');
+    return new RoadmapService({ current: { ...r.doc, access: undefined }, rulesFor: (u) => rules[u] ?? null, separationOfDuties: sod, now: () => clock.current });
+  }, [sod]);
+  const backend = useMemo(() => memoryBackend(svc, user), [svc, user]);
+  useEffect(() => { (window as unknown as { svc: unknown }).svc = svc; }, [svc]);
   const [theme, setTheme] = useState<'light' | 'dark' | undefined>();
   const [dock, setDock] = useState<'right' | 'bottom'>('right');
   const [lockZoom, setLockZoom] = useState(false);
@@ -67,6 +85,7 @@ function App() {
       <header className="demo-bar">
         <h1>Gantt gallery</h1>
         <label>Sample <select value={sample} onChange={(e) => setSample(e.target.value as SampleId)}>
+          <option value="proposals">Proposal workflow (mock backend)</option>
           <option value="small">Small (20 tasks, kinds, lane)</option>
           <option value="large">Large (10,000 tasks)</option>
           <option value="lanes">Large as lanes</option>
@@ -82,9 +101,33 @@ function App() {
         <label><input type="checkbox" checked={lockZoom} onChange={(e) => setLockZoom(e.target.checked)} /> Host refuses zoom</label>
         <label><input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} /> Read-only</label>
         <label><input type="checkbox" checked={failSave} onChange={(e) => setFailSave(e.target.checked)} /> Saves fail</label>
-        <span className="demo-meta">{result.r.ok ? `${result.r.doc.tasks.length} tasks, ${result.r.doc.links.length} links · validated in ${result.ms} ms` : 'Refused'}</span>
+        {sample === 'proposals' && <>
+          <label>User <select value={user} onChange={(e) => setUser(e.target.value)}>{USERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+          <label><input type="checkbox" checked={sod} onChange={(e) => setSod(e.target.checked)} /> Separation of duties</label>
+          <span className="demo-meta">Clock {clockLabel}</span>
+          <button onClick={() => { clock.current += DAY; setClockLabel(new Date(clock.current).toISOString().slice(0, 10)); svc.tick(); }}>+1 day</button>
+        </>}
+        <span className="demo-meta">{sample === 'proposals' ? '' : result.r.ok ? `${result.r.doc.tasks.length} tasks, ${result.r.doc.links.length} links · validated in ${result.ms} ms` : 'Refused'}</span>
       </header>
-      {result.r.ok
+      {sample === 'proposals'
+        ? <>
+          <Gantt key={user + String(sod)} ref={ref} backend={backend} access={rules[user] ?? null} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 110px)"
+            userId={user} locale={lang === 'de' ? 'de-DE' : undefined} messages={lang === 'de' ? german : undefined}
+            onProposalCreated={(e) => push(`event: proposalCreated ${e.proposal.name}`)}
+            onProposalSubmitted={(e) => push(`event: proposalSubmitted by ${e.actor}`)}
+            onProposalReviewed={(e) => push(`event: proposalReviewed by ${e.actor}`)}
+            onProposalApproved={(e) => push(`event: proposalApproved by ${e.actor}`)}
+            onProposalReturned={(e) => push(`event: proposalReturned: ${e.reason}`)}
+            onProposalRejected={(e) => push(`event: proposalRejected: ${e.reason}`)}
+            onProposalExpiring={(e) => push(`event: proposalExpiring (${e.phase}) at ${e.expiresAt.slice(0, 10)}`)}
+            onProposalExpired={(e) => push(`event: proposalExpired (${e.phase})`)}
+            onProposalStale={(e) => push(`event: proposalStale ${e.proposal.name}: version ${e.newVersion}`)}
+            onSeparationOfDutiesStatus={(e) => push(`separation of duties ${e.enforced ? 'enforced' : 'NOT enforced'}`)}
+            onOperationFailed={(e) => push(`✗ not saved: ${e.reason}`)}
+            onOperationRefused={(r) => push(`✗ ${describe(r.operation)}: ${r.reason}`)} />
+          <div className="demo-log" aria-label="Operations log" data-testid="oplog">{log.map((l, i) => <div key={i}>{l}</div>)}</div>
+        </>
+        : result.r.ok
         ? <>
           <Gantt ref={ref} data={result.r.doc} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 110px)"
             markers={[{ date: '2026-12-18', label: 'Code freeze' }]} userId="demo-user"

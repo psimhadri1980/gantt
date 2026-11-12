@@ -35,8 +35,8 @@ export type OperationResult =
 export interface OperationHooks {
   /** Interception: return false or a reason string to refuse. May return a promise (H3). */
   beforeOperation?: (op: GanttOperation, ctx: OperationContext) => boolean | string | void | Promise<boolean | string | void>;
-  /** Authorisation hook, called before every data operation (L5). */
-  authorize?: (op: DataOperation, ctx: OperationContext) => boolean | Promise<boolean>;
+  /** Authorisation hook, called before every data operation (L5). A string refuses with that reason. */
+  authorize?: (op: DataOperation, ctx: OperationContext) => boolean | string | Promise<boolean | string>;
   /** Listening: called after an operation has been applied. */
   operation?: (result: Extract<OperationResult, { ok: true }>, ctx: OperationContext) => void;
   /** Called when an operation is refused at any stage. */
@@ -138,12 +138,12 @@ export class OperationPipeline {
       hooks.operation?.(ok, ctx);
       return ok;
     };
-    const afterAuthorize = (allowed: boolean) => (allowed ? apply() : refuse('not permitted', 'authorization'));
+    const afterAuthorize = (allowed: boolean | string) => (allowed === true ? apply() : refuse(typeof allowed === 'string' && allowed ? allowed : 'not permitted', 'authorization'));
     const authorize = (): OperationResult | Promise<OperationResult> => {
       if (!isDataOperation(op) || !hooks.authorize) return apply();
-      let a: boolean | Promise<boolean>;
+      let a: boolean | string | Promise<boolean | string>;
       try { a = hooks.authorize(op, ctx); } catch { return afterAuthorize(false); } // fail closed
-      return isThenable(a) ? a.then(afterAuthorize, () => afterAuthorize(false)) : afterAuthorize(a);
+      return isThenable<boolean | string>(a) ? a.then(afterAuthorize, () => afterAuthorize(false)) : afterAuthorize(a);
     };
     const afterIntercept = (b: boolean | string | void) => {
       if (b === false) return refuse('refused by the host', 'intercepted');

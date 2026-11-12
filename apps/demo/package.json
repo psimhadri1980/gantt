@@ -1,3 +1,16 @@
-{ "name": "@gantt/demo", "private": true, "type": "module",
-  "scripts": { "dev": "vite --port 5180 --host 127.0.0.1", "build": "vite build" },
-  "dependencies": { "@gantt/react": "*", "@gantt/mock": "*", "react": "^19.1.0", "react-dom": "^19.1.0" } }
+{
+  "name": "@gantt/demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5180 --host 127.0.0.1",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@gantt/react": "*",
+    "@gantt/mock": "*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@gantt/service": "*"
+  }
+}

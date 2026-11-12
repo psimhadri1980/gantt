@@ -26,11 +26,11 @@ async function test(name, fn) {
     results.push(`  PASS  ${name}`);
   } catch (e) {
     failures++;
-    results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n')[0]}`);
+    results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n').slice(0, 3).join('\n        ')}`);
   } finally { await page.close(); }
 }
 const expectEq = (a, b, what) => { if (a !== b) throw new Error(`${what}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); };
-const detailsTitle = (page) => page.locator('.gx-details h3').first().textContent();
+const detailsTitle = (page) => page.locator('.gx-details h3').first().evaluate((h) => h.querySelector('input')?.value ?? h.textContent);
 const focusedText = (page) => page.evaluate(() => document.activeElement?.textContent ?? '');
 
 await test('small sample can be explored by keyboard alone, including a connector and its details', async (page) => {
@@ -173,7 +173,7 @@ await test('all visible text follows the messages and locale (German sample)', a
   await page.getByRole('radio', { name: 'Wochen' }).waitFor();
   await page.locator('[role="row"]', { hasText: 'Requirements' }).click();
   const details = await page.locator('.gx-details').textContent();
-  if (!details.includes('Zeitplan') || !details.includes('Arbeitstage')) throw new Error(`details not translated: ${details.slice(0, 120)}`);
+  if (!details.includes('Zeitplan') || !details.includes('Fortschritt')) throw new Error(`details not translated: ${details.slice(0, 120)}`);
   if (!/\d+\.\s?Nov/.test(details) && !/Nov\./.test(details)) throw new Error(`dates not in German format: ${details.slice(0, 160)}`);
 });
 
@@ -198,6 +198,136 @@ await test('holidays are shaded apart from weekends (G6)', async (page) => {
   await page.evaluate(() => window.gantt.current.scrollToTask('t17'));
   await page.locator('.gx-holiday').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => { throw new Error('no holiday shading around 24–25 Dec'); });
   if (!(await page.locator('.gx-nonwork:not(.gx-holiday)').count())) throw new Error('no weekend shading');
+});
+
+// ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------
+async function proposals(page) {
+  await page.goto('http://127.0.0.1:5192/?sample=proposals');
+  await page.waitForSelector('.gx-pbar');
+}
+const userSelect = (page) => page.getByLabel('User');
+const viewSelect = (page) => page.locator('.gx-pbar select');
+async function pickProposal(page) {
+  const value = await viewSelect(page).locator('option[value^="p:"]').first().getAttribute('value');
+  await viewSelect(page).selectOption(value);
+  await page.waitForTimeout(200);
+}
+
+await test('a user without view access sees the no-access state and nothing is fetched (L6)', async (page) => {
+  await proposals(page);
+  await userSelect(page).selectOption('mallory');
+  await page.getByText('You do not have access to this roadmap.').waitFor();
+  if (await page.locator('[role="treegrid"]').count()) throw new Error('the chart rendered without view');
+});
+
+await test('a viewer does not see tasks they may not view (L12)', async (page) => {
+  await proposals(page);
+  await userSelect(page).selectOption('erin');
+  await page.locator('[role="treegrid"]').waitFor();
+  if (await page.locator('[role="row"]', { hasText: 'Crew Atlas' }).count()) throw new Error('a crew row is visible to Erin');
+});
+
+await test('lifecycle through the interface: edit creates a Proposal, submit, review, approve changes Current (K0, K2, K5)', async (page) => {
+  await proposals(page);
+  // Alice edits a task name in the details panel: Current is untouched, a Proposal is created and shown.
+  await page.locator('[role="row"]', { hasText: 'Data model' }).click();
+  const name = page.locator('.gx-details h3 input');
+  await name.fill('Data model v2');
+  await name.press('Enter');
+  await page.locator('.gx-save', { hasText: 'Saved' }).waitFor();
+  expectEq((await viewSelect(page).inputValue()).startsWith('p:'), true, 'the view switches to the new Proposal');
+  expectEq(await page.evaluate(() => window.svc.snapshot('erin').current.tasks.find((t) => t.id === 't7').name), 'Data model', 'Current is unchanged');
+  await page.locator('.gx-pbar-actions [data-action="submit"]').click();
+  await page.locator('.gx-state', { hasText: 'Submitted' }).waitFor();
+  // Locked: the name field is no longer editable, with the reason.
+  await page.locator('[role="row"]', { hasText: 'Data model v2' }).click();
+  if (await page.locator('.gx-details h3 input').count()) throw new Error('a submitted Proposal is still editable');
+  // Bob reviews.
+  await userSelect(page).selectOption('bob');
+  await page.waitForSelector('.gx-pbar');
+  await pickProposal(page);
+  await page.locator('.gx-pbar-actions [data-action="review"]').click();
+  await page.locator('.gx-state', { hasText: 'Reviewed' }).waitFor();
+  // Carol approves; Current now has the change as version 13.
+  await userSelect(page).selectOption('carol');
+  await page.waitForSelector('.gx-pbar');
+  await pickProposal(page);
+  await page.locator('.gx-pbar-actions [data-action="approve"]').click();
+  await page.waitForFunction(() => window.svc.snapshot('erin').version === 13);
+  expectEq(await viewSelect(page).inputValue(), 'current', 'after approval the view returns to Current');
+  await page.locator('[role="row"]', { hasText: 'Data model v2' }).waitFor();
+  if (!(await viewSelect(page).locator('option', { hasText: 'Current (version 13)' }).count())) throw new Error('Current is not shown as version 13');
+});
+
+await test('return needs a reason, and the author sees it (K2d)', async (page) => {
+  await proposals(page);
+  await page.evaluate(() => { const p = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.9 } }]); window.svc.act('alice', p.id, 'submit'); });
+  await userSelect(page).selectOption('carol');
+  await page.waitForSelector('.gx-pbar');
+  await pickProposal(page);
+  await page.locator('.gx-pbar-actions [data-action="return"]').click();
+  await page.getByLabel('Reason').fill('Progress looks too high');
+  await page.getByRole('button', { name: 'Return', exact: true }).click();
+  await page.locator('.gx-state', { hasText: 'Returned' }).waitFor();
+  await page.locator('.gx-pbar .gx-note', { hasText: 'Returned: Progress looks too high' }).waitFor();
+});
+
+await test('separation of duties: the submitter is refused approval with the reason, and allowed when relaxed (K2a, K2b)', async (page) => {
+  await proposals(page);
+  await userSelect(page).selectOption('frank');
+  await page.waitForSelector('.gx-pbar');
+  await page.locator('[role="row"]', { hasText: 'Pilot' }).click();
+  await page.locator('.gx-details input[max="100"]').fill('40');
+  await page.locator('.gx-details input[max="100"]').press('Enter');
+  await page.locator('.gx-save', { hasText: 'Saved' }).waitFor();
+  await page.locator('.gx-pbar-actions [data-action="submit"]').click();
+  await page.locator('.gx-state', { hasText: 'Submitted' }).waitFor();
+  const approve = page.locator('.gx-pbar-actions [data-action="approve"]');
+  expectEq(await approve.getAttribute('aria-disabled'), 'true', 'Approve is disabled for the submitter');
+  if (!(await approve.getAttribute('title')).includes('You submitted this Proposal')) throw new Error('no reason on the disabled Approve');
+  // Playwright will not click an aria-disabled control; a user can, and is told why it does nothing (F14).
+  await approve.click({ force: true });
+  await page.locator('.gx-pbar-status', { hasText: 'You submitted this Proposal' }).waitFor();
+  // With separation of duties off (a fresh mock service), the same user can approve.
+  await page.getByLabel('Separation of duties').uncheck();
+  // A fresh mock service: wait until the previous chart (with its save indicator and Proposal) is gone.
+  await page.locator('.gx-save').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelector('.gx-pbar select')?.value === 'current');
+  await page.locator('[role="row"]', { hasText: 'Pilot' }).click();
+  await page.locator('.gx-details input[max="100"]').fill('40');
+  await page.locator('.gx-details input[max="100"]').press('Enter');
+  await page.locator('.gx-save', { hasText: 'Saved' }).waitFor();
+  await page.locator('.gx-pbar-actions [data-action="submit"]').click();
+  await page.locator('.gx-state', { hasText: 'Submitted' }).waitFor();
+  await page.locator('.gx-pbar-actions [data-action="approve"]').click();
+  await page.waitForFunction(() => window.svc.snapshot('erin').version === 13);
+});
+
+await test('a Proposal expires when its phase limit passes on the mock clock (K2e, M7)', async (page) => {
+  await proposals(page);
+  await page.evaluate(() => window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.3 } }]));
+  for (let i = 0; i < 8; i++) await page.getByRole('button', { name: '+1 day' }).click();
+  await page.getByTestId('oplog').getByText('event: proposalExpired (preparing)').waitFor();
+  await page.getByTestId('oplog').getByText(/event: proposalExpiring/).waitFor();
+  await pickProposal(page);
+  await page.locator('.gx-state', { hasText: 'Expired' }).waitFor();
+  await page.getByRole('button', { name: 'New Proposal from this' }).waitFor();
+});
+
+await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', async (page) => {
+  await proposals(page);
+  await page.evaluate(() => window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.3 } }]));
+  await page.locator('.gx-pbar select option[value^="p:"]').first().waitFor({ state: 'attached' });
+  await pickProposal(page);
+  await page.getByRole('button', { name: 'Compare with Current' }).click();
+  await page.getByRole('button', { name: 'History' }).click();
+  await page.locator('[role="row"]', { hasText: 'Architecture review' }).click();
+  await page.addScriptTag({ content: axeSource });
+  const v = await page.evaluate(async () => {
+    const r = await window.axe.run(document.querySelector('.gx-root'), { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] });
+    return r.violations.filter((x) => x.impact === 'serious' || x.impact === 'critical').map((x) => `${x.id} (${x.nodes.length}): ${x.nodes[0]?.target.join(' ')}`);
+  });
+  if (v.length) throw new Error(v.join(' | '));
 });
 
 for (const theme of ['Light', 'Dark']) {

@@ -1,7 +1,7 @@
 // Fails the build if a framework-free package imports React (ADR-001, condition 1).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-const FREE = ['contract', 'engine', 'state', 'mock', 'access', 'proposals'];
+const FREE = ['contract', 'engine', 'state', 'mock', 'access', 'proposals', 'service', 'server'];
 const bad = [];
 const walk = (dir) => { for (const f of readdirSync(dir)) { const p = join(dir, f);
   if (statSync(p).isDirectory()) walk(p);

@@ -5,7 +5,8 @@ import {
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
 } from '@gantt/state';
-import { fromDay, type DayNum } from '@gantt/engine';
+import { fromDay, place, type DayNum, type Placement } from '@gantt/engine';
+import { checkChange, type AccessEvaluator } from '@gantt/access';
 import { placeOffThread } from './engineClient.ts';
 import { DetailsPanel, type GanttKinds } from './Details.tsx';
 import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
@@ -53,8 +54,8 @@ export interface GanttProps {
   laneTrackHeight?: number;
   /** Shade weekends and holidays from the roadmap calendar (G6). Default true. */
   highlightNonWorking?: boolean;
-  /** Read-only mode (G9): every data operation is refused with a reason; viewing, selecting and zooming still work. */
-  readOnly?: boolean;
+  /** Read-only mode (G9): every data operation is refused; a string is the reason shown. Viewing, selecting and zooming still work. */
+  readOnly?: boolean | string;
   /** Override any visible text (G12). Dates and numbers follow `locale`. */
   messages?: Partial<GanttMessages>;
   /** Save indicator (F13), driven by the host that persists changes. Omit to hide it. */
@@ -102,31 +103,77 @@ interface Api {
   toggle: (id: string) => void;
   toggleLane: (id: string) => void;
   tip: (x: number, y: number, content: ReactNode | null) => void;
+  startEdit: (id: string) => void;
+  finishEdit: (id: string, value: string | null) => void;
 }
-interface Ctx { model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>; loadState: ReadonlyMap<string, string> }
+interface Compare { base: Placement; diff: Map<string, 'added' | 'changed'> }
+interface Ctx {
+  model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>;
+  loadState: ReadonlyMap<string, string>; compare: Compare | null; editing: string | null;
+}
 
 /**
  * Builds the model in its own task after the shell has painted, so no single main-thread task carries
  * both the model build and the first render (budget: no task over 100 ms). Shows the loading state meanwhile (F13).
  */
-export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(props, ref) {
+/** Internal props set by the outer Gantt (access gate and Proposal workflow). */
+export interface CoreProps extends GanttProps {
+  /** Access decisions for this user (L4, L5). */
+  evaluator?: AccessEvaluator;
+  /** Draw Current's dates as ghost bars and mark what differs (K4). */
+  compareWith?: RoadmapDocument;
+  /** Called after a data operation was applied locally (optimistic); the backend may still refuse it (H7). */
+  onCommit?: (op: DataOperation, doc: RoadmapDocument) => void;
+  /** Rendered above the chart, inside its frame (the Proposal bar). */
+  header?: ReactNode;
+}
+
+/** Maps a data operation to the change shape the access rules are written for. */
+export function changeOf(op: DataOperation): { entity: 'task' | 'link'; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> } {
+  switch (op.type) {
+    case 'task.create': return { entity: 'task', op: 'create', id: op.task.id, fields: { ...op.task } };
+    case 'task.update': return { entity: 'task', op: 'update', id: op.id, fields: op.fields as Record<string, unknown> };
+    case 'task.delete': return { entity: 'task', op: 'delete', id: op.id };
+    case 'link.create': return { entity: 'link', op: 'create', id: op.link.id, fields: { ...op.link } };
+    case 'link.update': return { entity: 'link', op: 'update', id: op.id, fields: op.fields as Record<string, unknown> };
+    case 'link.delete': return { entity: 'link', op: 'delete', id: op.id };
+  }
+}
+
+export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(props, ref) {
   // The working document: starts as props.data, changes through data operations, resets when props.data changes.
   const [working, setWorking] = useState<{ from: RoadmapDocument; doc: RoadmapDocument }>({ from: props.data, doc: props.data });
   const doc = working.from === props.data ? working.doc : props.data;
   const docRef = useRef(doc); docRef.current = doc;
   const propsRef = useRef(props); propsRef.current = props;
   const viewRef = useRef<ViewBridge | null>(null);
+  const lastRefusal = useRef<string | undefined>(undefined);
 
   const pipeline = useMemo(() => new OperationPipeline(
     () => {
       const p = propsRef.current;
       return {
         beforeOperation: (op, ctx) => {
-          if (p.readOnly && /^(task|link)\./.test(op.type)) return mergeMessages(p.messages).readOnly;
+          if (p.readOnly && /^(task|link)\./.test(op.type)) return typeof p.readOnly === 'string' ? p.readOnly : mergeMessages(p.messages).readOnly;
           return p.onBeforeOperation?.(op, ctx);
         },
-        authorize: p.authorize, operation: p.onOperation,
-        refused: (r, ctx) => { p.onOperationRefused?.(r, ctx); if (r.stage === 'authorization') p.onAccessDenied?.({ operation: r.operation, reason: r.reason }); },
+        // The access rules are checked first, then the host's own hook (L5). A refusal carries the reason.
+        authorize: (op, ctx) => {
+          const ev = p.evaluator;
+          if (ev) {
+            const c = changeOf(op);
+            const task = c.entity === 'task' ? docRef.current.tasks.find((t) => t.id === c.id) : undefined;
+            const d = checkChange(ev, c, task as never, docRef.current.roadmap.id);
+            if (!d.allowed) return d.reason!;
+          }
+          return p.authorize ? p.authorize(op, ctx) : true;
+        },
+        operation: p.onOperation,
+        refused: (r, ctx) => {
+          p.onOperationRefused?.(r, ctx);
+          if (r.stage === 'authorization') p.onAccessDenied?.({ operation: r.operation, reason: r.reason });
+          lastRefusal.current = r.reason;
+        },
       };
     },
     (op) => {
@@ -136,6 +183,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(props, r
       const from = propsRef.current.data;
       setWorking({ from, doc: r.doc });
       propsRef.current.onDataChanged?.(r.doc, op);
+      propsRef.current.onCommit?.(op, r.doc);
       return { inverse: r.inverse };
     },
     (op) => { if (!viewRef.current) throw new Error('the chart is still loading'); viewRef.current.apply(op); },
@@ -229,7 +277,7 @@ function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> 
   return <span className={`gx-save gx-save-${state.status}`} role="status">{text}</span>;
 }
 
-function GanttView(props: GanttProps & {
+function GanttView(props: CoreProps & {
   model: Model; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
   loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
 }) {
@@ -414,7 +462,10 @@ function GanttView(props: GanttProps & {
   }, [select]);
 
   const tipRef = useRef<(s: TipState | null) => void>(() => {});
+  const editRef = useRef<{ whyNotEdit: (id: string, f: string) => string | null; editTask: (id: string, f: Partial<Task>) => Promise<OperationResult> }>(null!);
   const api = useMemo<Api>(() => ({
+    startEdit: (id) => { if (editRef.current.whyNotEdit(id, 'name') === null) setEditing(id); },
+    finishEdit: (id, value) => { setEditing(null); if (value !== null && value.trim()) void editRef.current.editTask(id, { name: value.trim() }); },
     select: doSelect, focus: (row, bar) => setFocus((f) => (f.row === row && f.bar === bar ? f : { row, bar })), toggle, toggleLane,
     tip: (x, y, content) => tipRef.current(content == null ? null : { x, y, content }),
   }), [doSelect, toggle, toggleLane]);
@@ -456,7 +507,36 @@ function GanttView(props: GanttProps & {
     return () => { props.viewRef.current = null; };
   }, [props.viewRef]);
   const loadState = props.loadState;
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState }), [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState]);
+  // Comparison with Current (K4): Current's placement for ghost bars, and which tasks differ.
+  const compare = useMemo<Compare | null>(() => {
+    const base = props.compareWith;
+    if (!base) return null;
+    const baseById = new Map(base.tasks.map((t) => [t.id, t]));
+    const diff = new Map<string, 'added' | 'changed'>();
+    for (const t of data.tasks) {
+      const b = baseById.get(t.id);
+      if (!b) diff.set(t.id, 'added');
+      else if (JSON.stringify(b) !== JSON.stringify(t)) diff.set(t.id, 'changed');
+    }
+    return { base: place(base), diff };
+  }, [props.compareWith, data.tasks]);
+  // Inline editing of a task name in the grid (D7).
+  const [editing, setEditing] = useState<string | null>(null);
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing }), [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing]);
+  // What the user may change, with the reason when not (F14, L4).
+  const whyNotEdit = useCallback((taskId: string, field: string): string | null => {
+    const ro = props.readOnly;
+    if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
+    const t = model.tasks.get(taskId);
+    if (!t) return i18n.t.noLongerExists;
+    if ((t.type === 'summary' || (model.children.get(taskId)?.length ?? 0) > 0) && ['start', 'end', 'duration', 'progress'].includes(field)) return i18n.t.derivedDates;
+    const ev = props.evaluator;
+    if (!ev) return null;
+    const d = checkChange(ev, { entity: 'task', op: 'update', id: taskId, fields: { [field]: null } }, t as never, data.roadmap.id);
+    return d.allowed ? null : d.reason!;
+  }, [props.readOnly, props.evaluator, model, data.roadmap.id, i18n]);
+  const editTask = useCallback((taskId: string, fields: Partial<Task>) => run({ type: 'task.update', id: taskId, fields }, 'user'), [run]);
+  editRef.current = { whyNotEdit, editTask };
 
   const targetFor = (r: RowLayout, bar: number): SelectionTarget =>
     r.lane && bar >= 0 ? { type: 'bar', taskId: r.bars[bar]!.taskId, bar: 'main' } : { type: 'row', taskId: r.taskId };
@@ -551,6 +631,7 @@ function GanttView(props: GanttProps & {
         e.preventDefault();
         gridBodyRef.current?.querySelector<HTMLElement>('[role="row"][tabindex="0"]')?.focus();
       }}>
+      {props.header}
       {Toolbar && (
         <div className="gx-toolbar-row">
           <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit} />
@@ -614,7 +695,8 @@ function GanttView(props: GanttProps & {
             </div>
           </div>
         </div>
-        {detailsPanel && <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n} />}
+        {detailsPanel && <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n}
+          whyNotEdit={whyNotEdit} edit={editTask} compare={compare ? { base: props.compareWith!, placement: compare.base } : undefined} />}
       </div>
       <Tooltip setterRef={tipRef} />
       <div className="gx-sr" aria-live="polite">{announce}</div>
@@ -626,7 +708,7 @@ function GanttView(props: GanttProps & {
 // ---------- memoised layers ----------
 
 const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block: Block; ctx: Ctx; api: Api; focusRow: number }) {
-  const { model, kinds, locale, laneOpen, selKeys, linkMarked, loadState } = ctx;
+  const { model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing } = ctx;
   const { t: m, num } = useI18n();
   return <>{block.rows.map((r, k) => {
     const i = block.start + k;
@@ -638,7 +720,7 @@ const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block
       <div key={r.taskId} data-row={i} role="row" aria-level={r.depth + 1} aria-rowindex={i + 2}
         aria-expanded={r.hasChildren && !r.lane ? r.expanded : undefined} aria-selected={selected}
         tabIndex={i === focusRow || (focusRow < 0 && i === 0) ? 0 : -1}
-        className={`gx-row${selected ? ' gx-sel' : ''}${linkMarked.has(r.taskId) ? ' gx-marked' : ''}${i === focusRow ? ' gx-focus' : ''}${r.lane ? ' gx-lane' : ''}`}
+        className={`gx-row${selected ? ' gx-sel' : ''}${linkMarked.has(r.taskId) ? ' gx-marked' : ''}${i === focusRow ? ' gx-focus' : ''}${r.lane ? ' gx-lane' : ''}${compare?.diff.has(r.taskId) ? ` gx-diff-${compare.diff.get(r.taskId)}` : ''}`}
         style={{ top: r.top, height: r.height }}
         onFocus={() => api.focus(i, -1)}
         onClick={(e) => { api.focus(i, -1); api.select({ type: 'row', taskId: r.taskId }, e.ctrlKey || e.metaKey); }}>
@@ -651,7 +733,13 @@ const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block
             </button>
           ) : <span className="gx-twisty-sp" />}
           {kind?.icon ? <span className="gx-kind-icon" aria-hidden>{kind.icon}</span> : null}
-          <span className="gx-name-text" title={t.name}>{t.name}</span>
+          {editing === r.taskId
+            ? <input className="gx-inline-edit" defaultValue={t.name} aria-label={m.colName} autoFocus
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') api.finishEdit(r.taskId, e.currentTarget.value); if (e.key === 'Escape') api.finishEdit(r.taskId, null); }}
+                onBlur={(e) => api.finishEdit(r.taskId, e.currentTarget.value === t.name ? null : e.currentTarget.value)} />
+            : <span className="gx-name-text" title={t.name} onDoubleClick={(e) => { e.stopPropagation(); api.startEdit(r.taskId); }}>{t.name}</span>}
+          {compare?.diff.has(r.taskId) && <span className={`gx-badge gx-diff-badge-${compare.diff.get(r.taskId)}`}>{compare.diff.get(r.taskId) === 'added' ? m.diffAdded : m.diffChanged}</span>}
           {loadState.get(r.taskId) === 'loading' && <span className="gx-badge" role="status">{m.loadingChildren}</span>}
           {loadState.has(r.taskId) && loadState.get(r.taskId) !== 'loading' && <span className="gx-badge gx-badge-error" title={m.loadFailed(loadState.get(r.taskId)!)} role="status">⚠<span className="gx-sr">{m.loadFailed(loadState.get(r.taskId)!)}</span></span>}
           {r.lane && <span className="gx-badge" title={m.laneBarsHint}>{m.laneBars(num(r.bars.length))}</span>}
@@ -673,7 +761,7 @@ const RowBgBlock = memo(function RowBgBlock({ block, selKeys }: { block: Block; 
 
 const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   { block: Block; ctx: Ctx; api: Api; scale: Scale; bars: ReturnType<typeof barIndex>; focus: { row: number; bar: number } | null }) {
-  const { model, selKeys, linkMarked } = ctx;
+  const { model, selKeys, linkMarked, compare } = ctx;
   const i18n = useI18n();
   return <>{block.rows.flatMap((r, k) => r.bars.map((b, bi) => {
     const p = model.placement.byId.get(b.taskId)!;
@@ -694,12 +782,17 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
       const s = pos.h;
       return <div key={t.id} className={cls} style={{ left: x + scale.pxPerDay / 2 - s / 2, top: pos.y, width: s, height: s }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}><div className="gx-diamond" /><span className="gx-bar-label gx-outside">{t.name}</span></div>;
     }
-    return (
-      <div key={t.id} className={cls} style={{ left: x, top: pos.y, width: w, height: pos.h }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}>
+    // Where Current has this task, when it differs (K4).
+    const was = compare?.diff.get(t.id) === 'changed' ? compare.base.byId.get(t.id) : undefined;
+    const ghost = was?.scheduled && (was.start !== p.start || was.end !== p.end)
+      ? <div key={t.id + ':ghost'} className="gx-ghost" aria-hidden style={{ left: xOf(scale, was.start!), top: pos.y, width: Math.max(2, (was.end! - was.start! + 1) * scale.pxPerDay), height: pos.h }} />
+      : null;
+    return [ghost,
+      <div key={t.id} className={`${cls}${compare?.diff.has(t.id) ? ' gx-diff' : ''}`} style={{ left: x, top: pos.y, width: w, height: pos.h }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}>
         {!isSummary && <div className="gx-progress" style={{ width: `${Math.round(p.progress * 100)}%` }} />}
         <span className={`gx-bar-label${w < 60 ? ' gx-outside' : ''}`}>{t.name}</span>
-      </div>
-    );
+      </div>,
+    ];
   }))}</>;
 });
 

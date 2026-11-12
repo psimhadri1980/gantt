@@ -1,7 +1,7 @@
-import { memo, type ComponentType, type ReactNode } from 'react';
-import type { Link, Task } from '@gantt/contract';
+import { memo, useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import { formatDay, type Model, type SelectionTarget } from '@gantt/state';
-import type { DayNum } from '@gantt/engine';
+import { fromDay, toDay, type DayNum, type Placement } from '@gantt/engine';
 import { useI18n, type I18n } from './i18n.ts';
 
 export interface DetailsProps<T> {
@@ -31,13 +31,18 @@ interface Props {
   barIds: Map<string, unknown>;
   /** Changes when the messages or locale change, so the memoised panel re-renders. */
   i18n: I18n;
+  /** Null when the field may be changed, else the reason it may not (F14). */
+  whyNotEdit?: (taskId: string, field: string) => string | null;
+  edit?: (taskId: string, fields: Partial<Task>) => unknown;
+  /** Current, when comparing a Proposal with it (K4). */
+  compare?: { base: RoadmapDocument; placement: Placement };
 }
 
 const fmt = (d: DayNum | undefined, locale?: string) =>
   d === undefined ? '—' : formatDay(d, locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const readOnly = () => false; // Phase 1: the panel is read-only.
 
-export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n }: Props) {
+export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare }: Props) {
   const { t: m } = i18n;
   const primary = selection[selection.length - 1];
   let body: ReactNode;
@@ -55,11 +60,12 @@ export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds
     const t = model.tasks.get(primary.taskId);
     if (!t) body = <p className="gx-muted">{m.noLongerExists}</p>;
     else {
-      const Default = () => <TaskDetails task={t} model={model} select={select} kinds={kinds} />;
+      const Default = () => <TaskDetails task={t} model={model} select={select} kinds={kinds} whyNotEdit={whyNotEdit} edit={edit} compare={compare} />;
       const Custom = t.kind ? kinds?.rows?.[t.kind]?.details : undefined;
+      const canEdit = (field: string) => !!edit && !!whyNotEdit && whyNotEdit(t.id, field) === null;
       body = <>
         {!barIds.has(t.id) && <p className="gx-note">{m.notVisible(t.parent ? m.insideCollapsed(model.tasks.get(t.parent)?.name ?? t.parent) : m.outsideView)}</p>}
-        {Custom ? <Custom item={t} model={model} select={select} canEdit={readOnly} Default={Default} /> : <Default />}
+        {Custom ? <Custom item={t} model={model} select={select} canEdit={canEdit} Default={Default} /> : <Default />}
       </>;
     }
   }
@@ -73,7 +79,32 @@ function TaskRef({ id, model, select }: { id: string; model: Model; select: Prop
   return <button className="gx-link-btn" onClick={() => select({ type: 'row', taskId: id })}>{model.tasks.get(id)?.name ?? id}</button>;
 }
 
-function TaskDetails({ task: t, model, select, kinds }: { task: Task; model: Model; select: Props['select']; kinds?: GanttKinds }) {
+/**
+ * One field of the edit form (D7): an input where the user may change it, otherwise the value with the
+ * reason it cannot be changed (F14). A change is committed on Enter or when the field loses focus.
+ */
+function EditField({ label, value, display, type, taskId, field, whyNotEdit, onCommit, was, min, max, step, bare }: {
+  label: string; value: string; display: ReactNode; type: 'text' | 'date' | 'number'; taskId: string; field: string;
+  whyNotEdit?: Props['whyNotEdit']; onCommit?: (v: string) => void; was?: ReactNode; min?: number; max?: number; step?: number; bare?: boolean;
+}) {
+  const why = whyNotEdit ? whyNotEdit(taskId, field) : 'read-only';
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const id = `gx-f-${taskId}-${field}`;
+  const commit = () => { if (draft !== value && draft.trim() !== '') onCommit?.(draft); };
+  const control = why === null && onCommit
+    ? <input id={id} className="gx-input" type={type} value={draft} min={min} max={max} step={step} aria-label={bare ? label : undefined}
+        onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setDraft(value); }} />
+    : <span title={why !== 'read-only' && why ? why : undefined}>{display}</span>;
+  if (bare) return control;
+  return <>
+    <dt><label htmlFor={why === null ? id : undefined}>{label}</label></dt>
+    <dd>{control}{was !== undefined && <div className="gx-was">{was}</div>}</dd>
+  </>;
+}
+
+function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare }: { task: Task; model: Model; select: Props['select']; kinds?: GanttKinds; whyNotEdit?: Props['whyNotEdit']; edit?: Props['edit']; compare?: Props['compare'] }) {
   const { t: m, locale, num, pct } = useI18n();
   const p = model.placement.byId.get(t.id)!;
   const kids = model.children.get(t.id) ?? [];
@@ -90,13 +121,20 @@ function TaskDetails({ task: t, model, select, kinds }: { task: Task; model: Mod
   }, {} as Partial<Record<ChildState, number>>) : null;
   const known = new Set(['id', 'name', 'type', 'parent', 'kind', 'lane', 'hasChildren', 'start', 'duration', 'durationUnit', 'end', 'progress', 'mode', 'constraint', 'deadline', 'resources']);
   const extra = Object.entries(t).filter(([k]) => !known.has(k));
+  const before = compare?.base.tasks.find((x) => x.id === t.id);
+  const bp = before ? compare!.placement.byId.get(t.id) : undefined;
+  const wasText = (now: string, then: string | undefined) => (compare && before && then !== undefined && now !== then ? `${m.diffChanged}: ${then}` : undefined);
+  const set = (fields: Partial<Task>) => edit?.(t.id, fields);
   const linkBtn = (l: Link) => <button className="gx-link-btn gx-small" onClick={() => select({ type: 'link', linkId: l.id })}>{l.type}{l.lag ? ` +${num(l.lag)}` : ''}</button>;
 
   return (
     <div className="gx-d">
       <header>
         <div className="gx-d-type">{kindDef?.icon} {kindDef?.label ?? t.kind ?? typeLabel} · {model.wbs.get(t.id)}</div>
-        <h3>{t.name}</h3>
+        {edit && whyNotEdit?.(t.id, 'name') === null
+          ? <h3><EditField bare label={m.colName} value={t.name} display={t.name} type="text" taskId={t.id} field="name" whyNotEdit={whyNotEdit} onCommit={(v) => set({ name: v })} /></h3>
+          : <h3>{t.name}</h3>}
+        {compare && !before && <span className="gx-chip gx-diff-badge-added">{m.diffAdded}</span>}
         <div className="gx-chips">
           {!p.scheduled && <span className="gx-chip">{m.unscheduled}</span>}
           {t.deadline && p.end !== undefined && p.end > dayOf(t.deadline) && <span className="gx-chip gx-warn">{m.pastDeadline}</span>}
@@ -104,11 +142,17 @@ function TaskDetails({ task: t, model, select, kinds }: { task: Task; model: Mod
         </div>
       </header>
       <section><h4>{m.schedule}</h4><dl>
-        {t.type === 'milestone' ? <Field label={m.date}>{fmt(p.start, locale)}</Field> : <>
-          <Field label={m.start}>{fmt(p.start, locale)}</Field>
+        <EditField label={t.type === 'milestone' ? m.date : m.start} value={p.start !== undefined ? fromDay(p.start) : ''} display={fmt(p.start, locale)} type="date"
+          taskId={t.id} field="start" whyNotEdit={whyNotEdit} onCommit={(v) => set({ start: v, ...(t.end ? { end: undefined } : {}) })}
+          was={wasText(fmt(p.start, locale), bp && fmt(bp.start, locale))} />
+        {t.type !== 'milestone' && <>
           <Field label={m.end}>{fmt(p.end, locale)}</Field>
-          <Field label={m.duration}>{p.scheduled ? m.workingDays(num(p.duration ?? 0)) : '—'}</Field>
-          <Field label={m.progress}>{pct(p.progress)}</Field>
+          <EditField label={m.duration} value={String(p.duration ?? '')} display={p.scheduled ? m.workingDays(num(p.duration ?? 0)) : '—'} type="number" min={1} step={1}
+            taskId={t.id} field="duration" whyNotEdit={whyNotEdit} onCommit={(v) => set({ duration: Math.max(1, Math.round(Number(v))), ...(t.end ? { end: undefined } : {}) })}
+            was={wasText(String(p.duration), bp && String(bp.duration))} />
+          <EditField label={m.progress} value={String(Math.round(p.progress * 100))} display={pct(p.progress)} type="number" min={0} max={100} step={5}
+            taskId={t.id} field="progress" whyNotEdit={whyNotEdit} onCommit={(v) => set({ progress: Math.min(1, Math.max(0, Number(v) / 100)) })}
+            was={wasText(pct(p.progress), bp && pct(bp.progress))} />
         </>}
         {t.constraint && <Field label={m.constraint}>{t.constraint.type}{t.constraint.date ? ` ${fmt(dayOf(t.constraint.date), locale)}` : ''}</Field>}
         {t.deadline && <Field label={m.deadline}>{fmt(dayOf(t.deadline), locale)}</Field>}

@@ -1,7 +1,7 @@
 // Performance benchmark page (Phase 1 budget). Driven by scripts/bench.mjs; also usable by hand at /bench.html.
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { Gantt } from '@gantt/react';
+import { Gantt, type AccessRules } from '@gantt/react';
 import { generate, loadMock } from '@gantt/mock';
 import type { RoadmapDocument } from '@gantt/contract';
 
@@ -15,6 +15,16 @@ const phase = (name: string) => { phases[name] = Math.round(Math.max(0, ...longT
 new PerformanceObserver((l) => { for (const e of l.getEntries()) longTasks.push(e.duration); }).observe({ type: 'longtask', buffered: false });
 
 let root: Root | null = null;
+// Task-level and field-level rules, so the budget is measured with access control in force (Phase 2).
+const BENCH_ACCESS: AccessRules = {
+  subject: { id: 'bench', roles: ['planner'] },
+  rules: [
+    { effect: 'allow', permissions: ['view', 'proposal.create', 'proposal.edit', 'task.modify.progress'] },
+    { effect: 'allow', permissions: ['view.fields'], fields: ['start', 'duration', 'end', 'progress'] },
+    { effect: 'deny', permissions: ['view'], scope: { tasks: { ids: ['t5', 't9', 't77'] } } },
+    { effect: 'allow', permissions: ['task.modify.dates'], scope: { tasks: { types: ['milestone'] } } },
+  ],
+};
 const host = document.getElementById('root')!;
 
 function dataset(layout: 'bars' | 'lanes'): RoadmapDocument {
@@ -44,7 +54,7 @@ async function run(layout: 'bars' | 'lanes') {
   // 1. First render: data arrives → chart painted.
   const t0 = performance.now();
   root = createRoot(host);
-  flushSync(() => root!.render(<Gantt data={doc} height={800} detailsPanel="right" />));
+  flushSync(() => root!.render(<Gantt data={doc} height={800} detailsPanel="right" access={BENCH_ACCESS} />));
   while (!host.querySelector('.gx-bar')) await nextFrame();
   await painted();
   const firstRenderMs = Math.round(performance.now() - t0);
