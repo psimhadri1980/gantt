@@ -377,6 +377,8 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
       .finally(() => loadingRef.current.delete(id));
   }, []);
   const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(null);
+  /** The working document as it is now; the rendered one may lag while the engine places a change. */
+  const latestDoc = useCallback(() => docRef.current, []);
   const [failure, setFailure] = useState<{ doc: RoadmapDocument; message: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => { setFailure(null); setAttempt((a) => a + 1); }, []);
@@ -402,7 +404,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
   }
   return (
     <ViewBoundary key={attempt} fallback={(message) => <ErrorState {...props} message={message} retry={retry} themeAttr={themeAttr} />}>
-      <GanttView {...props} data={built.data} model={built.model} run={run} viewRef={viewRef} loadState={loadState} requestChildren={requestChildren} history={history} />
+      <GanttView {...props} data={built.data} model={built.model} latestDoc={latestDoc} run={run} viewRef={viewRef} loadState={loadState} requestChildren={requestChildren} history={history} />
     </ViewBoundary>
   );
 });
@@ -436,7 +438,7 @@ function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> 
 }
 
 function GanttView(props: CoreProps & {
-  model: Model; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
+  model: Model; latestDoc: () => RoadmapDocument; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
   loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
   history: { undo: () => Promise<OperationResult | null>; redo: () => Promise<OperationResult | null>; canUndo: boolean; canRedo: boolean };
 }) {
@@ -856,6 +858,9 @@ function GanttView(props: CoreProps & {
     if (ops.length) { commit(ops.length === 1 ? ops[0]! : { type: 'batch', ops }); select([]); }
   };
   // ---------- Tree editing (D2, D3, D4, D15, D16) ----------
+  // Tree edits read the tree as it is now, not as last drawn: two quick edits in a row (indent, then
+  // outdent) must each see the result of the one before. Positions come from the drawn placement.
+  const treeModel = (): Model => { const d = props.latestDoc(); return d === baseModel.doc ? baseModel : buildModel(d, baseModel.placement); };
   type TreeOut = { ops: DataOperation[]; ids?: string[] } | { error: string };
   const runTree = (r: TreeOut, label: string, after?: (ids?: string[]) => void) => {
     if ('error' in r) { say(r.error); return; }
@@ -866,6 +871,7 @@ function GanttView(props: CoreProps & {
   const selectedTasks = (): string[] => editTargets().filter((id) => !isGroupId(id) && baseModel.tasks.has(id));
   const whyNotMove = (ids: string[]) => ids.map((id) => whyNotEdit(id, 'parent')).find((w) => w) ?? null;
   const addTask = (parent: string | null, index: number, name?: string, near?: string) => {
+    const baseModel = treeModel();
     const why = whyNotCreate(parent ?? ''); if (why) { say(why); return; }
     const ref = near ? baseModel.placement.byId.get(near) : undefined;
     const cal = baseModel.placement.calendar;
@@ -878,12 +884,14 @@ function GanttView(props: CoreProps & {
     });
   };
   const addBelow = (id: string) => {
+    const baseModel = treeModel();
     const t = baseModel.tasks.get(id); if (!t) return;
     const sibs = baseModel.children.get(t.parent) ?? [];
     addTask(t.parent, sibs.indexOf(id) + 1, undefined, id);
   };
-  const addChild = (id: string) => addTask(id, baseModel.children.get(id)?.length ?? 0, undefined, id);
+  const addChild = (id: string) => addTask(id, treeModel().children.get(id)?.length ?? 0, undefined, id);
   const addFromPlaceholder = (name: string) => {
+    const baseModel = treeModel();
     // Quick entry (D4): at the end of the selected summary, else at the end of the top level.
     const p = selection[selection.length - 1];
     const into = p && p.type === 'row' && (baseModel.children.get(p.taskId)?.length ?? 0) > 0 ? p.taskId : null;
@@ -891,6 +899,7 @@ function GanttView(props: CoreProps & {
   };
   const clip = useRef<{ clip: TreeClipboard; cut: boolean } | null>(null);
   const copySel = (cut: boolean) => {
+    const baseModel = treeModel();
     const ids = selectedTasks(); if (!ids.length) return;
     if (cut) { const why = whyNotMove(ids); if (why) { say(why); return; } }
     const c = copyTasks(baseModel, ids);
@@ -900,12 +909,14 @@ function GanttView(props: CoreProps & {
   };
   /** Where a paste or duplicate lands: after the selected task, among its siblings; else at the end. */
   const pastePlace = (): { parent: string | null; index: number } => {
+    const baseModel = treeModel();
     const p = selectedTasks().at(-1);
     const t = p ? baseModel.tasks.get(p) : undefined;
     if (!t) return { parent: null, index: baseModel.children.get(null)?.length ?? 0 };
     return { parent: t.parent, index: (baseModel.children.get(t.parent) ?? []).indexOf(t.id) + 1 };
   };
   const pasteSel = () => {
+    const baseModel = treeModel();
     const c = clip.current; if (!c) { say(m.nothingToPaste); return; }
     const { parent, index } = pastePlace();
     if (c.cut) {
@@ -921,17 +932,20 @@ function GanttView(props: CoreProps & {
     });
   };
   const duplicateSel = () => {
+    const baseModel = treeModel();
     const ids = selectedTasks(); if (!ids.length) return;
     const why = whyNotCreate(''); if (why) { say(why); return; }
     runTree(duplicateOps(baseModel, ids, () => newId()), 'duplicate', (n) => { if (n?.length) select(n.map((id) => ({ type: 'row' as const, taskId: id }))); });
   };
   const indentSel = (out: boolean) => {
+    const baseModel = treeModel();
     const ids = selectedTasks(); if (!ids.length) return;
     const why = whyNotMove(ids); if (why) { say(why); return; }
     runTree(out ? outdentOps(baseModel, ids) : indentOps(baseModel, ids), out ? 'outdent' : 'indent', () => { for (const id of ids) scrollToTask(id); });
   };
   /** Dragging rows in the grid by their WBS cell (D2): before or after a row, or onto it to make it the parent. */
   const rowPointerDown = (e: React.PointerEvent, _i: number, id: string) => {
+    const baseModel = treeModel();
     if (e.button !== 0 || !(e.target as HTMLElement).closest('.gx-grip') || isGroupId(id)) return;
     const body = gridBodyRef.current; if (!body) return;
     const ids = selKeys.has(`row:${id}`) ? selectedTasks() : [id];
