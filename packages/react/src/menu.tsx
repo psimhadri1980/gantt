@@ -1,5 +1,9 @@
+/**
+ * Context menus (F9): keyboard navigable, with disabled entries that say why, closed by Esc or a click outside.
+ */
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 
+/** One entry of a context menu: its label and action, or why it is disabled; optionally a shortcut hint, a check mark, or a separator. */
 export interface MenuItem {
   label: string;
   run?: () => void;

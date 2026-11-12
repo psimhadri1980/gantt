@@ -11,6 +11,7 @@ import { makeI18n, type GanttMessages } from './i18n.ts';
  */
 
 const DAY = 86_400_000;
+/** The display name of a field group ("schedule", "progress"…), or the group id when there is none. */
 const groupText = (m: GanttMessages, g: string) => m.groupName[g] ?? g;
 
 /** The Proposals of this roadmap with owner, state, age, expiry, changes and shared tasks (K11). */
@@ -48,11 +49,13 @@ export function ProposalList({ snap, m, locale, now, open, refresh }: {
   );
 }
 
+/** The fields of a task that belong to the given groups, as "field: value" lines. */
 const fieldsOf = (t: Task | null, groups: string[]) => {
   if (!t) return [];
   const keys = Object.keys(t).filter((k) => k !== 'id' && groups.some((g) => g === k || (g === 'schedule' && ['start', 'end', 'duration', 'durationUnit', 'constraint'].includes(k)) || (g === 'position' && ['parent', 'order'].includes(k))));
   return keys.map((k) => `${k}: ${JSON.stringify((t as Record<string, unknown>)[k])}`);
 };
+/** One person's version of a task, limited to the fields in conflict (or "deleted"). */
 function TaskVersion({ task, groups, m }: { task: Task | null; groups: string[]; m: GanttMessages }) {
   if (!task) return <em>{m.deleted}</em>;
   const lines = fieldsOf(task, groups);

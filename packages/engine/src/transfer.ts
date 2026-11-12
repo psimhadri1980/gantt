@@ -16,6 +16,7 @@ export interface CompactPlacement {
   errors: Issue[]; warnings: Issue[];
 }
 
+/** Places the roadmap and packs the result into typed arrays, so the worker can transfer it without copying. */
 export function placeCompact(doc: RoadmapDocument): CompactPlacement {
   const p = place(doc);
   const n = doc.tasks.length;
@@ -32,6 +33,7 @@ export function placeCompact(doc: RoadmapDocument): CompactPlacement {
   return c;
 }
 
+/** The array buffers of a compact placement, passed as the transfer list of `postMessage`. */
 export const transferList = (c: CompactPlacement): ArrayBuffer[] =>
   [c.start, c.end, c.duration, c.progress, c.scheduled].map((a) => a.buffer as ArrayBuffer);
 

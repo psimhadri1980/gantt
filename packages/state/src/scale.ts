@@ -22,13 +22,19 @@ export const ZOOM_LEVELS: ZoomLevel[] = [
 /** An hour level for hour-based plans (G4); add it to `zoomLevels` when needed. */
 export const HOUR_ZOOM: ZoomLevel = { id: 'hour', label: 'Hours', pxPerDay: 24 * 32, major: 'day', minor: 'hour' };
 
+/** The time scale of the chart: the day at x = 0 and the zoom, in pixels per day. */
 export interface Scale { origin: DayNum; pxPerDay: number }
+/** The x position (in pixels) of the start of a day. */
 export const xOf = (s: Scale, d: DayNum) => (d - s.origin) * s.pxPerDay;
+/** The day at an x position. */
 export const dayAt = (s: Scale, x: number) => Math.floor(x / s.pxPerDay) + s.origin;
 
+/** One label on the time scale: the day it starts, its position and width in pixels, and its text. */
 export interface Tick { day: DayNum; x: number; w: number; label: string }
 
+/** The year, month and day of a day number. */
 const ymd = (d: DayNum) => { const s = fromDay(d); return { y: +s.slice(0, 4), m: +s.slice(5, 7), d: +s.slice(8, 10) }; };
+/** The day number of a calendar date (month 1–12). */
 const dayOf = (y: number, m: number, d = 1) => Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
 
 /**

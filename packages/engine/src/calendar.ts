@@ -9,9 +9,13 @@ export type DayNum = number;
 
 export const DEFAULT_CALENDAR: Calendar = { id: '__default', name: 'Monday–Friday', workingDays: [1, 2, 3, 4, 5], hoursPerDay: 8 };
 
+/**
+ * Converts an ISO date ("2026-11-13") to a day number: whole days since 1970-01-01 (UTC, so no time-zone shifts).
+ */
 export function toDay(iso: IsoDate): DayNum {
   return Math.floor(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86_400_000);
 }
+/** Converts a day number back to an ISO date string. */
 export function fromDay(d: DayNum): IsoDate {
   return new Date(d * 86_400_000).toISOString().slice(0, 10);
 }
@@ -20,6 +24,10 @@ export function weekday(d: DayNum): number {
   return ((((d + 3) % 7) + 7) % 7) + 1;
 }
 
+/**
+ * Working time of one calendar (C3, G4): which weekdays are worked and which dates are holidays. Every date
+ * computation in the engine goes through it, so a task on a 4-day calendar is placed in its own working time.
+ */
 export class WorkCalendar {
   readonly id: string;
   private readonly working = new Set<number>();
@@ -32,8 +40,11 @@ export class WorkCalendar {
     if (this.working.size === 0) throw new Error(`Calendar ${cal.id} has no working days`);
   }
 
+  /** True when the day is one of this calendar's holidays. */
   isHoliday(d: DayNum): boolean { return this.holidays.has(d); }
+  /** The holidays between two days, inclusive (used to explain why a task is longer than its working days). */
   holidaysBetween(from: DayNum, to: DayNum): DayNum[] { return [...this.holidays].filter((h) => h >= from && h <= to); }
+  /** True when the day is a working weekday and not a holiday. */
   isWorking(d: DayNum): boolean {
     return this.working.has(weekday(d)) && !this.holidays.has(d);
   }
@@ -77,6 +88,7 @@ export class WorkCalendar {
   }
 }
 
+/** Builds a `WorkCalendar` for each calendar in the document, keyed by id. */
 export function buildCalendars(cals: Calendar[] | undefined): Map<string, WorkCalendar> {
   const m = new Map<string, WorkCalendar>();
   for (const c of cals ?? []) m.set(c.id, new WorkCalendar(c));
@@ -89,6 +101,10 @@ export function buildCalendars(cals: Calendar[] | undefined): Map<string, WorkCa
  * be fractional for hour-based tasks.
  */
 export interface TaskSpan { start: DayNum; end: DayNum; segments: [DayNum, DayNum][]; endFraction: number; occupied: number }
+/**
+ * Places `work` working days starting at `start` (moved forward to the first working day), honouring planned
+ * interruptions (`splits`: after N working days, pause for `gap` working days). See `TaskSpan` for the result.
+ */
 export function spanOf(cal: WorkCalendar, start: DayNum, work: number, splits?: { after: number; gap: number }[]): TaskSpan {
   const s0 = cal.nextWorking(start);
   if (work <= 0) return { start: s0, end: s0, segments: [[s0, s0]], endFraction: 1, occupied: 0 };

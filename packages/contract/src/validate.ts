@@ -1,12 +1,20 @@
+/**
+ * Validation of a roadmap document (A6): every field's type and format, references between tasks, links and
+ * calendars, and structural rules (no parent cycles, no link cycles, no link between a summary and its descendant).
+ * Errors refuse the document; warnings (such as unknown fields) are reported but accepted.
+ */
 import { CONTRACT_MAJOR, CONTRACT_NAME, type RoadmapDocument } from './types.ts';
 
+/** One problem in a document: where (a path such as "tasks[3].start") and what is wrong. */
 export interface Issue { path: string; message: string }
+/** The validated document with warnings, or the errors that refused it. */
 export type ValidationResult =
   | { ok: true; doc: RoadmapDocument; warnings: Issue[] }
   | { ok: false; errors: Issue[]; warnings: Issue[] };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** True for a real calendar date written as YYYY-MM-DD (so "2026-02-30" is refused). */
 export function isIsoDate(v: unknown): v is string {
   if (typeof v !== 'string' || !DATE_RE.test(v)) return false;
   const d = new Date(v + 'T00:00:00Z');
@@ -226,6 +234,9 @@ export function validate(input: unknown): ValidationResult {
   return errors.length ? { ok: false, errors, warnings } : { ok: true, doc: input as unknown as RoadmapDocument, warnings };
 }
 
+/**
+ * Finds one cycle among the links (depth-first search over source → target); returns its task ids in order, or null.
+ */
 function findCycle(adj: Map<string, string[]>): string[] | null {
   const state = new Map<string, 1 | 2>();
   const stack: string[] = [];

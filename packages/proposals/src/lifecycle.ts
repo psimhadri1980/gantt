@@ -1,9 +1,17 @@
+/**
+ * The Proposal lifecycle (K2): Draft → Submitted → (Reviewed) → Approved. A submitted Proposal can also be
+ * withdrawn (back to Draft), returned for changes or rejected; a Draft can be discarded; and a Proposal that
+ * outlives its phase's time limit becomes Expired. Pure functions: each transition returns a new record or the reason it is
+ * not allowed; nothing here stores anything.
+ */
 import type { ProposalChange } from '@gantt/contract';
 import type { Pick } from './concurrency.ts';
 
 /** Lifecycle states (plan section 3a). */
 export type ProposalState = 'Draft' | 'Returned' | 'Submitted' | 'Reviewed' | 'Approved' | 'Rejected' | 'Expired' | 'Discarded';
+/** Which part of the workflow a Proposal is in; each phase has its own time limit. */
 export type Phase = 'preparing' | 'review' | 'approval';
+/** The actions that move a Proposal through its lifecycle (each needs its own permission). */
 export type LifecycleAction = 'submit' | 'withdraw' | 'review' | 'approve' | 'return' | 'reject' | 'discard';
 
 /** The four time limits in whole days (K2g). */
@@ -11,11 +19,15 @@ export interface ProposalLimits { draftDays: number; reviewDays: number; approva
 export const DEFAULT_LIMITS: ProposalLimits = { draftDays: 7, reviewDays: 2, approvalDays: 2, reworkMinDays: 2 };
 const DAY = 86_400_000;
 
+/**
+ * Checks the configured time limits; returns the problem, or null when every limit is a positive whole number of days.
+ */
 export function checkLimits(l: ProposalLimits): string | null {
   for (const [k, v] of Object.entries(l)) if (!Number.isInteger(v) || v <= 0) return `${k} must be a positive whole number of days`;
   return null;
 }
 
+/** One step in a Proposal's history: when, by whom, which action, and the comment given. */
 export interface HistoryEntry {
   at: string;
   by: string;
@@ -29,6 +41,10 @@ export interface HistoryEntry {
   count?: number;
 }
 
+/**
+ * A Proposal as the service stores it: identity, owner, state, the version it is based on, its changes,
+ * its deadlines and history, and what it looked like before the last refresh (for undoing that refresh).
+ */
 export interface ProposalRecord {
   id: string;
   name: string;
@@ -62,11 +78,15 @@ export interface ProposalRecord {
   history: HistoryEntry[];
 }
 
+/** True while a Proposal can still change state (not approved, rejected or discarded). */
 export const isOpen = (s: ProposalState) => s === 'Draft' || s === 'Returned' || s === 'Submitted' || s === 'Reviewed';
+/** True while the owner can still edit the Proposal's changes. */
 export const isEditable = (s: ProposalState) => s === 'Draft' || s === 'Returned';
 
+/** A timestamp in milliseconds as an ISO string. */
 const iso = (ms: number) => new Date(ms).toISOString();
 
+/** A new Draft Proposal, with the preparation deadline counted from now. */
 export function createProposal(p: { id: string; name: string; roadmapId: string; owner: string; baseVersion: number; now: number; limits: ProposalLimits; derivedFrom?: string; changes?: ProposalChange[] }): ProposalRecord {
   return {
     id: p.id, name: p.name, roadmapId: p.roadmapId, owner: p.owner, state: 'Draft', baseVersion: p.baseVersion,
@@ -76,6 +96,7 @@ export function createProposal(p: { id: string; name: string; roadmapId: string;
   };
 }
 
+/** Who is acting, when, why, and the settings that apply, for one lifecycle transition. */
 export interface TransitionContext {
   actor: string;
   now: number;
@@ -88,6 +109,7 @@ export interface TransitionContext {
   currentVersion: number;
 }
 
+/** The new Proposal after a transition, or the reason it is not allowed. */
 export type TransitionResult = { ok: true; proposal: ProposalRecord } | { ok: false; reason: string };
 
 const FROM: Record<LifecycleAction, ProposalState[]> = {

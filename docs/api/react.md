@@ -1,5 +1,7 @@
 # @gantt/react
 
+The React Gantt component.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 33 exports.
@@ -55,6 +57,9 @@ const defaultMessages: GanttMessages
 
 *interface* · [packages/react/src/Details.tsx](../../packages/react/src/Details.tsx)
 
+What a custom details panel for a kind of task or link receives: the item, the model, a way to select
+another item, whether a field may be edited, and the built-in panel (`Default`) to render or wrap.
+
 ```ts
 export interface DetailsProps<T> {
   item: T;
@@ -68,6 +73,8 @@ export interface DetailsProps<T> {
 ## ExportFormat
 
 *type* · [packages/react/src/Gantt.tsx](../../packages/react/src/Gantt.tsx)
+
+The file formats the Export menu offers.
 
 ```ts
 export type ExportFormat = 'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi';
@@ -140,6 +147,8 @@ export interface GanttHandle {
 ## GanttKinds
 
 *interface* · [packages/react/src/Details.tsx](../../packages/react/src/Details.tsx)
+
+The kinds a host defines (G7): per kind of row and per kind of link. A task's or link's `kind` field picks one.
 
 ```ts
 export interface GanttKinds {
@@ -475,6 +484,8 @@ export interface GanttMessages {
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
 
+Every operation the Gantt accepts: changes to the roadmap and changes to the view.
+
 ```ts
 export type GanttOperation = DataOperation | ViewOperation;
 ```
@@ -482,6 +493,9 @@ export type GanttOperation = DataOperation | ViewOperation;
 ## GanttProps
 
 *interface* · [packages/react/src/GanttRoot.tsx](../../packages/react/src/GanttRoot.tsx)
+
+Props of the public `<Gantt>`: everything the core component takes, plus either `data` (data mode) or a
+`backend` (the Proposal workflow), access rules, and callbacks for the workflow's events.
 
 ```ts
 export interface GanttRootProps extends Omit<GanttProps, 'data'>, EventCallbacks {
@@ -509,6 +523,9 @@ export interface GanttRootProps extends Omit<GanttProps, 'data'>, EventCallbacks
 ## GanttViewState
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+Everything a user can change about how the roadmap is shown (sorting, filtering, grouping, columns),
+kept per user and restorable as a saved view (D9–D11, D19).
 
 ```ts
 export interface GanttViewState {
@@ -585,6 +602,8 @@ export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof f
 
 *interface* · [packages/react/src/Details.tsx](../../packages/react/src/Details.tsx)
 
+How one kind of task or link is shown: its label, an optional icon, and optionally its own details panel.
+
 ```ts
 export interface KindDefinition<T> {
   label: string;
@@ -618,6 +637,8 @@ export function memoryBackend(service: RoadmapService, userId: string): GanttBac
 
 *interface* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
 
+Who made an operation and how: the user in the UI, the host through the API, or undo/redo.
+
 ```ts
 export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo' | 'redo' }
 ```
@@ -625,6 +646,9 @@ export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo'
 ## OperationResult
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+The outcome of running an operation: accepted (with the operations that undo it), or refused with the reason
+and the stage that refused it (the host's interception, a permission, or validation).
 
 ```ts
 export type OperationResult =
@@ -636,6 +660,8 @@ export type OperationResult =
 
 *type* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
+One permission name, such as 'view', 'task.modify' or 'proposal.approve'.
+
 ```ts
 export type Permission = (typeof PERMISSIONS)[number];
 ```
@@ -643,6 +669,8 @@ export type Permission = (typeof PERMISSIONS)[number];
 ## Rule
 
 *interface* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
+
+One access rule: allow or deny some permissions, for some roles, within a scope, optionally under a condition.
 
 ```ts
 export interface Rule {
@@ -661,6 +689,8 @@ export interface Rule {
 ## SavedView
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+A named view the user saved.
 
 ```ts
 export interface SavedView { id: string; name: string; view: GanttViewState }
@@ -690,6 +720,8 @@ export async function scheduleOffThread(doc: RoadmapDocument): Promise<{ result:
 
 *type* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
 
+What can be selected: a grid row, a bar (one of a task's bars when it has several) or a link.
+
 ```ts
 export type SelectionTarget =
   | { type: 'row'; taskId: string }
@@ -700,6 +732,8 @@ export type SelectionTarget =
 ## ToolbarProps
 
 *interface* · [packages/react/src/Gantt.tsx](../../packages/react/src/Gantt.tsx)
+
+What a custom toolbar receives: the zoom and its setter, Today and Fit, critical path and schedule controls.
 
 ```ts
 export interface ToolbarProps {
@@ -714,6 +748,9 @@ export interface ToolbarProps {
 ## ViewOperation
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+Operations that change only what is shown (expanding rows, zoom, selection, scrolling), never the roadmap itself.
+They are not saved, not undone and need no permission.
 
 ```ts
 export type ViewOperation =

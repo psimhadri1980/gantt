@@ -1,3 +1,7 @@
+/**
+ * The HTTP API over a RoadmapService: one route per service method, the acting user from a request header,
+ * errors mapped to status codes, and server-sent events for live updates.
+ */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { BackendError, ServiceError, type RoadmapService } from '@gantt/service';
 import type { LifecycleAction } from '@gantt/proposals';
@@ -47,6 +51,10 @@ export function createGanttServer(service: RoadmapService, opts: { allowOrigin?:
   });
 }
 
+/**
+ * Server-sent events: pushes a message to the user's browser whenever the roadmap or a Proposal changes,
+ * so other people's edits appear without polling (K15). Refused before streaming for a user without `view`.
+ */
 function events(req: IncomingMessage, res: ServerResponse, service: RoadmapService, user: string) {
   service.snapshot(user); // throws without view: nothing is streamed to a user without access
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -56,12 +64,14 @@ function events(req: IncomingMessage, res: ServerResponse, service: RoadmapServi
   req.on('close', () => { off(); clearInterval(ping); });
 }
 
+/** Allows the configured browser origin to call the API (cross-origin requests). */
 function cors(res: ServerResponse, origin?: string) {
   if (!origin) return;
   res.setHeader('access-control-allow-origin', origin);
   res.setHeader('access-control-allow-headers', 'content-type, x-gantt-user');
   res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
 }
+/** Writes a JSON response with the given status. */
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
 }

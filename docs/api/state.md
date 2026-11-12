@@ -1,5 +1,7 @@
 # @gantt/state
 
+Framework-free view state: row layout, time scale, selection, the operation pipeline with undo, tree edits, and sorting, filtering and grouping.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 66 exports.
@@ -45,6 +47,8 @@ export interface BarLayout {
 
 *interface* · [packages/state/src/links.ts](../../packages/state/src/links.ts)
 
+A bar's vertical position: top (y) and height in pixels.
+
 ```ts
 export interface BarPos { y: number; h: number }
 ```
@@ -63,6 +67,8 @@ export function buildModel(doc: RoadmapDocument, placement: Placement = place(do
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
 
+A grid column's width and visibility as the user left them.
+
 ```ts
 export interface ColumnState { id: string; width?: number; hidden?: boolean }
 ```
@@ -70,6 +76,9 @@ export interface ColumnState { id: string; width?: number; hidden?: boolean }
 ## copyTasks
 
 *function* · [packages/state/src/tree.ts](../../packages/state/src/tree.ts)
+
+Copies tasks for pasting (D15): each selected subtree once (children of a selected parent come with it),
+with the links that run between copied tasks.
 
 ```ts
 export function copyTasks(m: Model, ids: string[]): TreeClipboard
@@ -98,6 +107,8 @@ export type DataOperation =
 
 *function* · [packages/state/src/format.ts](../../packages/state/src/format.ts)
 
+A cached `Intl.DateTimeFormat`: creating one is slow, and the chart formats thousands of dates per frame.
+
 ```ts
 export function dateFormat(locale: string | undefined, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat
 ```
@@ -105,6 +116,8 @@ export function dateFormat(locale: string | undefined, opts: Intl.DateTimeFormat
 ## dayAt
 
 *const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+The day at an x position.
 
 ```ts
 const dayAt: (s: Scale, x: number) => number
@@ -162,6 +175,8 @@ const flattenOps: (op: DataOperation) => DataOperation[]
 
 *const* · [packages/state/src/format.ts](../../packages/state/src/format.ts)
 
+Formats a day number in the locale with the given options.
+
 ```ts
 const formatDay: (day: number, locale: string | undefined, opts: Intl.DateTimeFormatOptions) => string
 ```
@@ -170,6 +185,8 @@ const formatDay: (day: number, locale: string | undefined, opts: Intl.DateTimeFo
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
 
+Every operation the Gantt accepts: changes to the roadmap and changes to the view.
+
 ```ts
 export type GanttOperation = DataOperation | ViewOperation;
 ```
@@ -177,6 +194,9 @@ export type GanttOperation = DataOperation | ViewOperation;
 ## GanttViewState
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+Everything a user can change about how the roadmap is shown (sorting, filtering, grouping, columns),
+kept per user and restorable as a saved view (D9–D11, D19).
 
 ```ts
 export interface GanttViewState {
@@ -227,6 +247,8 @@ export function indentOps(m: Model, ids: string[]): TreeResult
 
 *const* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
 
+True for operations that change the roadmap (and so go through permissions, Proposals and undo).
+
 ```ts
 const isDataOperation: (op: GanttOperation) => op is DataOperation
 ```
@@ -234,6 +256,8 @@ const isDataOperation: (op: GanttOperation) => op is DataOperation
 ## isGroupId
 
 *const* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+True for the id of a group header row (rows made by "group by", not tasks).
 
 ```ts
 const isGroupId: (id: string) => boolean
@@ -252,6 +276,8 @@ export function isoWeek(d: DayNum): number
 ## isViewActive
 
 *function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
+
+True when the view changes what is shown (a sort, a group or a non-empty filter), so the UI can offer "Reset view".
 
 ```ts
 export function isViewActive(v: GanttViewState | undefined): boolean
@@ -321,6 +347,8 @@ export function localeWeekStart(locale?: string): number
 
 *function* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
 
+True when the task's name, id or WBS code contains the search text (ignoring case and surrounding spaces).
+
 ```ts
 export function matchesText(m: Model, id: string, q: string): boolean
 ```
@@ -339,6 +367,9 @@ export function mergeChildren(doc: RoadmapDocument, parentId: string, loaded: { 
 ## Model
 
 *interface* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
+
+Everything the view needs to draw a roadmap: the document, its placement, the tree (parents, children,
+WBS codes) and indexes by id. Built once per document version by `buildModel`.
 
 ```ts
 export interface Model {
@@ -376,6 +407,8 @@ export function newTaskOps(m: Model, parent: string | null, index: number, task:
 
 *interface* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
 
+Who made an operation and how: the user in the UI, the host through the API, or undo/redo.
+
 ```ts
 export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo' | 'redo' }
 ```
@@ -383,6 +416,8 @@ export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo'
 ## OperationHooks
 
 *interface* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+Hooks the host gives the pipeline: interception before an operation, and notifications after it runs or is refused.
 
 ```ts
 export interface OperationHooks {
@@ -414,6 +449,9 @@ export class OperationPipeline {
 ## OperationResult
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+The outcome of running an operation: accepted (with the operations that undo it), or refused with the reason
+and the stage that refused it (the host's interception, a permission, or validation).
 
 ```ts
 export type OperationResult =
@@ -464,6 +502,8 @@ export function rowAt(rows: RowLayout[], y: number): number
 
 *interface* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
 
+One visible row: which task, how deep in the tree, its top and height in pixels, and whether it is a lane.
+
 ```ts
 export interface RowLayout {
   taskId: string;
@@ -495,6 +535,8 @@ export interface RowSizes { row: number; laneTrack: number }
 
 *const* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
 
+True when two selection targets point at the same row, bar or link.
+
 ```ts
 const sameTarget: (a: SelectionTarget, b: SelectionTarget) => boolean
 ```
@@ -503,6 +545,8 @@ const sameTarget: (a: SelectionTarget, b: SelectionTarget) => boolean
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
 
+A named view the user saved.
+
 ```ts
 export interface SavedView { id: string; name: string; view: GanttViewState }
 ```
@@ -510,6 +554,8 @@ export interface SavedView { id: string; name: string; view: GanttViewState }
 ## Scale
 
 *interface* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+The time scale of the chart: the day at x = 0 and the zoom, in pixels per day.
 
 ```ts
 export interface Scale { origin: DayNum; pxPerDay: number }
@@ -528,6 +574,8 @@ export type ScaleUnit = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour';
 ## SelectionTarget
 
 *type* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
+
+What can be selected: a grid row, a bar (one of a task's bars when it has several) or a link.
 
 ```ts
 export type SelectionTarget =
@@ -550,6 +598,8 @@ export function sortTreeOrder(m: Model, ids: string[]): string[]
 
 *const* · [packages/state/src/selection.ts](../../packages/state/src/selection.ts)
 
+A string key for a selection target, used in sets and as React keys.
+
 ```ts
 const targetKey: (t: SelectionTarget) => string
 ```
@@ -557,6 +607,8 @@ const targetKey: (t: SelectionTarget) => string
 ## Tick
 
 *interface* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+One label on the time scale: the day it starts, its position and width in pixels, and its text.
 
 ```ts
 export interface Tick { day: DayNum; x: number; w: number; label: string }
@@ -588,6 +640,8 @@ export function topmost(m: Model, ids: Iterable<string>): string[]
 
 *function* · [packages/state/src/layout.ts](../../packages/state/src/layout.ts)
 
+Total height in pixels of the given rows (the bottom of the last one).
+
 ```ts
 export function totalHeight(rows: RowLayout[]): number
 ```
@@ -617,6 +671,8 @@ export type TreeResult = { ops: DataOperation[] } | { error: string };
 
 *interface* · [packages/state/src/view.ts](../../packages/state/src/view.ts)
 
+What the user filtered by: free text, and for each field the values to keep.
+
 ```ts
 export interface ViewFilter {
   /** Matches name, id or WBS code, ignoring case. */
@@ -640,6 +696,9 @@ export function viewModel(m: Model, v: GanttViewState | undefined, groupLabel: (
 ## ViewOperation
 
 *type* · [packages/state/src/operations.ts](../../packages/state/src/operations.ts)
+
+Operations that change only what is shown (expanding rows, zoom, selection, scrolling), never the roadmap itself.
+They are not saved, not undone and need no permission.
 
 ```ts
 export type ViewOperation =
@@ -665,6 +724,8 @@ export interface ViewSort { field: string; dir: 'asc' | 'desc' }
 ## xOf
 
 *const* · [packages/state/src/scale.ts](../../packages/state/src/scale.ts)
+
+The x position (in pixels) of the start of a day.
 
 ```ts
 const xOf: (s: Scale, d: DayNum) => number

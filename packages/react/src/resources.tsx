@@ -54,6 +54,7 @@ export const LoadPanel = memo(function LoadPanel({ load, scale, labelWidth, inne
   );
 });
 
+/** One unplanned work item in the backlog: its id, name, and optionally a duration in days and a kind. */
 export interface BacklogItem { id: string; name: string; duration?: number; kind?: string }
 
 /** Work not yet planned (D5): drag an item onto the chart to create the task where it is dropped. */

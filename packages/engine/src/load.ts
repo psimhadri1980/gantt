@@ -9,6 +9,7 @@ import { place, type Placement } from './schedule.ts';
  */
 
 export type LoadPeriod = 'day' | 'week' | 'month';
+/** Demand and capacity of one row in one period (a day, week or month, depending on the zoom). */
 export interface LoadBucket {
   start: DayNum; end: DayNum;
   /** Demand in FTE-days. */
@@ -18,6 +19,7 @@ export interface LoadBucket {
   /** Working days in the bucket on which demand exceeds that day's capacity (E4). */
   overDays: number;
 }
+/** One row of the load chart: a named resource, an owner without resource data, or the total demand. */
 export interface LoadRow {
   key: string;
   label: string;
@@ -28,12 +30,14 @@ export interface LoadRow {
   /** Tasks that put demand on this row. */
   tasks: string[];
 }
+/** Result of `resourceLoad`: the rows to draw and whether demand was assumed (no assignments at all). */
 export interface ResourceLoad {
   rows: LoadRow[];
   /** True when no task has assignments: every task counts as 1 FTE (E7). */
   defaultDemand: boolean;
 }
 
+/** The tasks that carry work: leaves only (summaries would count their children twice), active, and placed. */
 const leafTasks = (doc: RoadmapDocument, placement: Placement) => {
   const parents = new Set(doc.tasks.map((t) => t.parent).filter(Boolean));
   return doc.tasks.filter((t) => !parents.has(t.id) && t.type === 'task' && t.mode !== 'inactive' && placement.byId.get(t.id)?.scheduled);

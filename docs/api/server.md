@@ -1,5 +1,7 @@
 # @gantt/server
 
+A reference HTTP server for the roadmap service: JSON API and server-sent events.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 3 exports.
@@ -19,6 +21,10 @@ export function createGanttServer(service: RoadmapService, opts: { allowOrigin?:
 ## readEnv
 
 *function* · [packages/server/src/env.ts](../../packages/server/src/env.ts)
+
+Reads the server's settings from environment variables (GANTT_ENVIRONMENT or NODE_ENV, GANTT_ENABLE_MOCK_DATA,
+GANTT_ENFORCE_SEPARATION_OF_DUTIES, PORT). Refuses to start in production with separation of duties turned off;
+ignores mock data in production; and returns a warning for every relaxed setting so the log shows it.
 
 ```ts
 export function readEnv(env: Record<string, string | undefined>): { ok: true; env: ServerEnv; warnings: string[] } | { ok: false; error: string }

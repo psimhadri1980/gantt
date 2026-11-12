@@ -1,5 +1,7 @@
 # @gantt/engine
 
+Scheduling and placement without UI: working calendars, the scheduler and critical path, bar placement, resource load and levelling, baselines and progress tracking.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 37 exports.
@@ -17,6 +19,8 @@ export function applySchedule(doc: RoadmapDocument, r: ScheduleResult): RoadmapD
 ## buildCalendars
 
 *function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Builds a `WorkCalendar` for each calendar in the document, keyed by id.
 
 ```ts
 export function buildCalendars(cals: Calendar[] | undefined): Map<string, WorkCalendar>
@@ -85,6 +89,8 @@ export function fixesFor(doc: RoadmapDocument, issue: ScheduleIssue): IssueFix[]
 
 *function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
 
+Converts a day number back to an ISO date string.
+
 ```ts
 export function fromDay(d: DayNum): IsoDate
 ```
@@ -119,6 +125,8 @@ export function levelResources(doc: RoadmapDocument): { changes: { id: string; f
 
 *interface* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
 
+Demand and capacity of one row in one period (a day, week or month, depending on the zoom).
+
 ```ts
 export interface LoadBucket {
   start: DayNum; end: DayNum;
@@ -145,6 +153,8 @@ export type LoadPeriod = 'day' | 'week' | 'month';
 ## LoadRow
 
 *interface* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
+
+One row of the load chart: a named resource, an owner without resource data, or the total demand.
 
 ```ts
 export interface LoadRow {
@@ -184,6 +194,8 @@ export function place(doc: RoadmapDocument): Placement
 
 *function* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
 
+Places the roadmap and packs the result into typed arrays, so the worker can transfer it without copying.
+
 ```ts
 export function placeCompact(doc: RoadmapDocument): CompactPlacement
 ```
@@ -214,6 +226,8 @@ export interface PlacedTask {
 
 *interface* · [packages/engine/src/schedule.ts](../../packages/engine/src/schedule.ts)
 
+The placed roadmap: each task's start, end, duration and progress as drawn, plus the default calendar.
+
 ```ts
 export interface Placement {
   byId: Map<string, PlacedTask>;
@@ -238,6 +252,8 @@ export function progressLine(placement: Placement, statusDay: DayNum, tolerance 
 ## ProgressPoint
 
 *interface* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
+
+Where the progress line passes one task: left of the status date when the task is behind, right when ahead.
 
 ```ts
 export interface ProgressPoint {
@@ -268,6 +284,8 @@ export function resourceLoad(doc: RoadmapDocument, placement: Placement, opts: {
 
 *interface* · [packages/engine/src/load.ts](../../packages/engine/src/load.ts)
 
+Result of `resourceLoad`: the rows to draw and whether demand was assumed (no assignments at all).
+
 ```ts
 export interface ResourceLoad {
   rows: LoadRow[];
@@ -280,6 +298,10 @@ export interface ResourceLoad {
 
 *function* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
 
+Computes the schedule of a whole roadmap (C1–C8): every task's earliest start and finish from its own date,
+its constraint, its predecessors (with lag, on each task's calendar) and its parent's dates. Summaries span their
+children. Tasks in a cycle are reported and left at their stored dates. Pure: the document is not changed.
+
 ```ts
 export function schedule(doc: RoadmapDocument): ScheduleResult
 ```
@@ -287,6 +309,9 @@ export function schedule(doc: RoadmapDocument): ScheduleResult
 ## ScheduleIssue
 
 *interface* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
+
+A problem the scheduler found. `kind` says which: a dependency cycle, a link the stored dates break, a constraint
+that cannot be met, or a deadline the task finishes after. `taskId`/`linkId` point at what to fix.
 
 ```ts
 export interface ScheduleIssue {
@@ -306,6 +331,9 @@ export interface ScheduleIssue {
 ## ScheduleResult
 
 *interface* · [packages/engine/src/scheduler.ts](../../packages/engine/src/scheduler.ts)
+
+What `schedule` returns: the computed dates per task, the edits that would apply them, the problems found,
+and the latest finish (undefined for an empty roadmap).
 
 ```ts
 export interface ScheduleResult {
@@ -335,6 +363,8 @@ export function sCurve(placement: Placement, statusDay: DayNum, baseline?: Basel
 
 *interface* · [packages/engine/src/tracking.ts](../../packages/engine/src/tracking.ts)
 
+Planned versus actual cumulative work over time, for the S-curve chart.
+
 ```ts
 export interface SCurve {
   /** One entry per calendar day from the first start to the last finish. */
@@ -352,6 +382,9 @@ export interface SCurve {
 ## spanOf
 
 *function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Places `work` working days starting at `start` (moved forward to the first working day), honouring planned
+interruptions (`splits`: after N working days, pause for `gap` working days). See `TaskSpan` for the result.
 
 ```ts
 export function spanOf(cal: WorkCalendar, start: DayNum, work: number, splits?: { after: number; gap: number }[]): TaskSpan
@@ -416,6 +449,8 @@ export interface TaskSpan { start: DayNum; end: DayNum; segments: [DayNum, DayNu
 
 *function* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
 
+Converts an ISO date ("2026-11-13") to a day number: whole days since 1970-01-01 (UTC, so no time-zone shifts).
+
 ```ts
 export function toDay(iso: IsoDate): DayNum
 ```
@@ -423,6 +458,8 @@ export function toDay(iso: IsoDate): DayNum
 ## transferList
 
 *const* · [packages/engine/src/transfer.ts](../../packages/engine/src/transfer.ts)
+
+The array buffers of a compact placement, passed as the transfer list of `postMessage`.
 
 ```ts
 const transferList: (c: CompactPlacement) => ArrayBuffer[]
@@ -452,6 +489,9 @@ export function whyNotLink(doc: RoadmapDocument, source: string, target: string,
 ## WorkCalendar
 
 *class* · [packages/engine/src/calendar.ts](../../packages/engine/src/calendar.ts)
+
+Working time of one calendar (C3, G4): which weekdays are worked and which dates are holidays. Every date
+computation in the engine goes through it, so a task on a 4-day calendar is placed in its own working time.
 
 ```ts
 export class WorkCalendar {

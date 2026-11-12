@@ -1,3 +1,6 @@
+/**
+ * CSV import and export (I1): the task table as comma-separated text (RFC 4180 quoting), UTF-8 with a byte-order mark.
+ */
 import type { RoadmapDocument } from '@gantt/contract';
 import { docFromTable, tableFromDoc, type ImportResult } from './table.ts';
 
@@ -26,5 +29,7 @@ export function readCsv(text: string): string[][] {
   return rows;
 }
 
-export const toCsv = (doc: RoadmapDocument) => '﻿' + writeCsv(tableFromDoc(doc));
+/** The roadmap as CSV text. Starts with a byte-order mark so Excel reads it as UTF-8. */
+export const toCsv = (doc: RoadmapDocument) => '\uFEFF' + writeCsv(tableFromDoc(doc));
+/** Reads CSV text into a roadmap. */
 export const fromCsv = (text: string, base: Parameters<typeof docFromTable>[1]): ImportResult => docFromTable(readCsv(text), base);

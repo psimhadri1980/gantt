@@ -619,6 +619,7 @@ export const defaultMessages: GanttMessages = {
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
+/** Combines the host's message overrides with the English defaults; nested message groups merge key by key. */
 export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
   if (!over) return defaultMessages;
   return {
@@ -647,10 +648,14 @@ export function localizeReason(t: GanttMessages, reason: string | null | undefin
   return m ? t.missingPermission(m[1]!, m[2]) : reason;
 }
 
+/** The active language: the messages, the locale, and number and percentage formatters for it. */
 export interface I18n { t: GanttMessages; locale?: string; num: (n: number) => string; pct: (v: number) => string }
+/** Builds the language context for a set of messages and a locale. */
 export function makeI18n(t: GanttMessages, locale?: string): I18n {
   const nf = new Intl.NumberFormat(locale), pf = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 });
   return { t, locale, num: (n) => nf.format(n), pct: (v) => pf.format(v) };
 }
+/** The language context provided by the Gantt to every part of it. */
 export const I18nContext = createContext<I18n>(makeI18n(defaultMessages));
+/** The current language, for components inside the Gantt. */
 export const useI18n = () => useContext(I18nContext);

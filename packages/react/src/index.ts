@@ -1,3 +1,6 @@
+/**
+ * @gantt/react: the React Gantt component and everything a host application uses with it.
+ */
 export { Gantt, type GanttRootProps as GanttProps } from './GanttRoot.tsx';
 export { type GanttHandle, type ToolbarProps, type GridColumn, type CellProps, type GanttViewState, type SavedView, type ExportFormat } from './Gantt.tsx';
 export type { AccessRules, Permission, Rule } from '@gantt/access';

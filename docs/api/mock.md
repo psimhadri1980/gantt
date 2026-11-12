@@ -1,5 +1,7 @@
 # @gantt/mock
 
+Sample roadmaps, a generator for large ones, and the validating loader for mock files.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 6 exports.
@@ -28,6 +30,8 @@ export function generate(opts: GenerateOptions): RoadmapDocument
 
 *interface* · [packages/mock/src/generate.ts](../../packages/mock/src/generate.ts)
 
+Size and shape of a generated roadmap (for benchmarks and tests).
+
 ```ts
 export interface GenerateOptions {
   tasks: number;
@@ -55,6 +59,8 @@ export function loadMock(input: string | unknown): LoadResult
 ## LoadResult
 
 *type* · [packages/mock/src/index.ts](../../packages/mock/src/index.ts)
+
+The result of loading a mock file: the document (with warnings) or the reasons it was refused.
 
 ```ts
 export type LoadResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[]; warnings: Issue[] };

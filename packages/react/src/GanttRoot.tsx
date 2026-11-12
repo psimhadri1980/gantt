@@ -1,3 +1,8 @@
+/**
+ * The public `<Gantt>`. Resolves access (static rules or `resolveAccess`), then renders either the given data
+ * filtered for the user, or the Proposal workflow against a backend: the Proposal bar, the list of Proposals,
+ * concurrent-change and refresh dialogs, and routing of every edit into the user's Proposal.
+ */
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RoadmapDocument } from '@gantt/contract';
 import { AccessEvaluator, filterDocument, mergeAccess, type AccessRules, type Condition } from '@gantt/access';
@@ -8,9 +13,15 @@ import type { DataOperation, GanttOperation } from '@gantt/state';
 import { changesOf, CoreGantt, fmtDate, type GanttHandle, type GanttProps } from './Gantt.tsx';
 import { localizeReason, mergeMessages, makeI18n, type GanttMessages } from './i18n.ts';
 
+/** The names of the service events. */
 type EventName = ServiceEvent['type'];
+/** One optional callback prop per service event: `onProposalApproved`, `onProposalStale` and so on. */
 type EventCallbacks = { [K in EventName as `on${Capitalize<K>}`]?: (e: ServiceEvent & { type: K }) => void };
 
+/**
+ * Props of the public `<Gantt>`: everything the core component takes, plus either `data` (data mode) or a
+ * `backend` (the Proposal workflow), access rules, and callbacks for the workflow's events.
+ */
 export interface GanttRootProps extends Omit<GanttProps, 'data'>, EventCallbacks {
   /** Data mode: the roadmap to show. Ignored when `backend` is given. */
   data?: RoadmapDocument;
@@ -82,7 +93,9 @@ export const Gantt = forwardRef<GanttHandle, GanttRootProps>(function Gantt(prop
   return <CoreGantt {...props} ref={ref} data={data} evaluator={evaluator} />;
 });
 
+/** What the user is looking at in managed mode: Current, one Proposal, or an earlier approved version. */
 type View = { kind: 'current' } | { kind: 'proposal'; id: string } | { kind: 'version'; version: number };
+/** Whether the last change reached the backend. */
 type SaveState = { status: 'saving' | 'saved' | 'error'; reason?: string };
 
 /** The Proposal workflow over a backend (section K). */
@@ -299,10 +312,15 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   );
 }
 
+/** The user's own Proposals that can still be edited (Draft or Returned). */
 const editableOwn = (s: Snapshot, user: string) => s.proposals.filter((p) => p.owner === user && (p.state === 'Draft' || p.state === 'Returned'));
 
 const ACTIONS: LifecycleAction[] = ['submit', 'withdraw', 'review', 'approve', 'return', 'reject', 'discard'];
 
+/**
+ * The bar above the chart in managed mode: which view is shown, the Proposal's state and deadlines, the
+ * lifecycle actions (with reasons when unavailable), comparison, refresh, version restore and baseline offers.
+ */
 function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide, cc, pick, onRefresh, onUndoRefresh, now, selectTask, restoreVersion, offerBaseline, setOfferBaseline, saveBaseline }: {
   restoreVersion: (v: number) => void; offerBaseline: boolean; setOfferBaseline: (b: boolean) => void; saveBaseline: (name: string) => void;
   cc: Concurrency | null; pick: (taskId: string, keep: string) => void; onRefresh: (p: ProposalSummary) => void; onUndoRefresh: (p: ProposalSummary) => void;

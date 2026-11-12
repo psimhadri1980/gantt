@@ -101,6 +101,10 @@ export function outdentOps(m: Model, ids: string[]): TreeResult {
 /** What copy and cut put on the clipboard (D15): whole subtrees and the links between them. */
 export interface TreeClipboard { tasks: Task[]; links: Link[]; roots: string[] }
 
+/**
+ * Copies tasks for pasting (D15): each selected subtree once (children of a selected parent come with it),
+ * with the links that run between copied tasks.
+ */
 export function copyTasks(m: Model, ids: string[]): TreeClipboard {
   const roots = topmost(m, ids);
   const tasks: Task[] = [];

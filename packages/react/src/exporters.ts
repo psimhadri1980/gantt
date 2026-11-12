@@ -97,6 +97,7 @@ export function renderChartImage(o: ImageOptions): HTMLCanvasElement {
   return canvas;
 }
 
+/** A canvas as an image blob (PNG or JPEG), rejecting if the browser cannot encode it. */
 export const canvasBlob = (c: HTMLCanvasElement, type: string, quality?: number) =>
   new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error('the image could not be created'))), type, quality));
 

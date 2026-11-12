@@ -1,5 +1,7 @@
 # @gantt/service
 
+The roadmap service (Current, approved versions and Proposals, with access checks) and the in-memory and HTTP backends the React component uses.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 15 exports.
@@ -15,6 +17,8 @@ const ACTION_PERMISSION: Record<LifecycleAction, 'view' | 'view.fields' | 'view.
 ## BackendError
 
 *class* · [packages/service/src/backend.ts](../../packages/service/src/backend.ts)
+
+A failed backend request, with the service's error code or 'network' when the server could not be reached.
 
 ```ts
 export class BackendError extends Error {
@@ -181,6 +185,8 @@ export class RoadmapService {
 
 *interface* · [packages/service/src/service.ts](../../packages/service/src/service.ts)
 
+How this roadmap's Proposal workflow is configured: whether the submitter may also approve, and the time limits.
+
 ```ts
 export interface ServiceConfig {
   separationOfDuties: boolean;
@@ -194,6 +200,9 @@ export interface ServiceConfig {
 
 *class* · [packages/service/src/service.ts](../../packages/service/src/service.ts)
 
+A refused request. `code` lets callers (and the HTTP server) tell no access, a missing permission, an unknown id,
+invalid input and a conflict with someone else's change apart.
+
 ```ts
 export class ServiceError extends Error {
   constructor(message: string, readonly code: 'noAccess' | 'denied' | 'notFound' | 'invalid' | 'conflict')
@@ -203,6 +212,10 @@ export class ServiceError extends Error {
 ## ServiceEvent
 
 *type* · [packages/service/src/service.ts](../../packages/service/src/service.ts)
+
+What the service announces to subscribers: a Proposal moved through its lifecycle or changed, a deadline is
+near or passed, a Proposal became stale because another one was approved, or two people changed the same task.
+The server forwards these to browsers as server-sent events.
 
 ```ts
 export type ServiceEvent =
@@ -219,6 +232,8 @@ export type ServiceEvent =
 ## ServiceOptions
 
 *interface* · [packages/service/src/service.ts](../../packages/service/src/service.ts)
+
+What a service is created with: the starting roadmap, how to find a user's access rules, and the workflow settings.
 
 ```ts
 export interface ServiceOptions {
@@ -238,6 +253,8 @@ export interface ServiceOptions {
 ## Snapshot
 
 *interface* · [packages/service/src/service.ts](../../packages/service/src/service.ts)
+
+What one user may see of the roadmap: the configuration, Current (filtered for them) and the Proposals visible to them.
 
 ```ts
 export interface Snapshot {

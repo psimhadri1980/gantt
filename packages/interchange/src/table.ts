@@ -5,6 +5,7 @@ import { validate, type Issue, type Link, type LinkType, type RoadmapDocument, t
  * such as "t2FS; t3SS+2". Every field this table carries survives export followed by import.
  */
 export const COLUMNS = ['id', 'name', 'type', 'parent', 'kind', 'start', 'duration', 'durationUnit', 'progress', 'owner', 'predecessors', 'constraint', 'constraintDate', 'deadline', 'mode'] as const;
+/** One column name of the import/export table. */
 export type Column = (typeof COLUMNS)[number];
 /** Task and link fields the table carries; an import changes only these (others are kept as they are). */
 export const TABLE_FIELDS = { task: ['name', 'type', 'parent', 'kind', 'start', 'duration', 'durationUnit', 'progress', 'owner', 'constraint', 'deadline', 'mode', 'order'], link: ['source', 'target', 'type', 'lag', 'lagUnit'] };
@@ -16,6 +17,10 @@ const SYNONYMS: Record<string, Column> = {
   assignee: 'owner', dependencies: 'predecessors', dependson: 'predecessors', predecessor: 'predecessors',
 };
 
+/**
+ * The roadmap as a table: a header row of `COLUMNS`, then one row per task in tree order with its predecessors
+ * written like Project does ("3FS+2d").
+ */
 export function tableFromDoc(doc: RoadmapDocument): string[][] {
   const preds = new Map<string, Link[]>();
   for (const l of doc.links) (preds.get(l.target) ?? preds.set(l.target, []).get(l.target)!).push(l);
@@ -35,6 +40,7 @@ export function tableFromDoc(doc: RoadmapDocument): string[][] {
   return [[...COLUMNS], ...rows];
 }
 
+/** The roadmap read from a table, with warnings, or the reasons it was refused. */
 export type ImportResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
 
 /**

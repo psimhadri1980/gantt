@@ -1,3 +1,6 @@
+/**
+ * View tools (D9–D11, D19): popovers for filter values and columns, the find bar, and the saved-view picker.
+ */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { SavedView } from '@gantt/state';
 import { useI18n } from './i18n.ts';

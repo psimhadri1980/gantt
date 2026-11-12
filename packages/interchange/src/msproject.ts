@@ -10,13 +10,19 @@ import { fromDay, place, toDay } from '@gantt/engine';
 /** Task and link fields MSPDI carries; an import changes only these. */
 export const MSPDI_FIELDS = { task: ['name', 'type', 'parent', 'start', 'duration', 'durationUnit', 'progress', 'owner', 'constraint', 'deadline', 'mode', 'order'], link: ['source', 'target', 'type', 'lag', 'lagUnit'] };
 
+/** Escapes text for XML element content. */
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Reverses XML escaping, including the entities Project writes. */
 const unesc = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 const LINK_TYPE: Record<Link['type'], number> = { FF: 0, FS: 1, SF: 2, SS: 3 };
 const LINK_FROM = ['FF', 'FS', 'SF', 'SS'] as const;
 const CONSTRAINT: Record<ConstraintType, number> = { ASAP: 0, MSO: 2, MFO: 3, SNET: 4, SNLT: 5, FNET: 6, FNLT: 7 };
 const CONSTRAINT_FROM: Record<number, ConstraintType> = { 0: 'ASAP', 2: 'MSO', 3: 'MFO', 4: 'SNET', 5: 'SNLT', 6: 'FNET', 7: 'FNLT' };
 
+/**
+ * Writes the roadmap as Microsoft Project XML (MSPDI): tasks in outline order with WBS, dates, durations, progress,
+ * milestones and predecessors. Ids and owners round-trip through the Text1 and Text2 fields.
+ */
 export function toMsProject(doc: RoadmapDocument): string {
   const p = place(doc);
   const hpd = doc.calendars?.find((c) => c.id === doc.roadmap.defaultCalendar)?.hoursPerDay ?? 8;
@@ -63,6 +69,7 @@ export function toMsProject(doc: RoadmapDocument): string {
     + `<Tasks>${tasks.join('\n')}</Tasks></Project>\n`;
 }
 
+/** The trimmed text of the first `<name>` element, or undefined. */
 const tag = (xml: string, name: string) => { const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(xml); return m ? unesc(m[1]!.trim()) : undefined; };
 /** ISO 8601 duration (PT16H0M0S, P2D…) in hours. */
 const hoursOf = (d: string, hpd: number) => {
@@ -70,8 +77,13 @@ const hoursOf = (d: string, hpd: number) => {
   return m ? +(m[1] ?? 0) * hpd + +(m[2] ?? 0) + +(m[3] ?? 0) / 60 + +(m[4] ?? 0) / 3600 : NaN;
 };
 
+/** The roadmap read from a Project file, with warnings, or the reasons it was refused. */
 export type MsImport = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
 
+/**
+ * Reads Microsoft Project XML (MSPDI) into a roadmap: outline levels become the tree, durations are converted with
+ * the file's minutes per day, and predecessors become links. `base` supplies what the file does not (roadmap id…).
+ */
 export function fromMsProject(xml: string, base?: Partial<RoadmapDocument>): MsImport {
   if (!/<Project[\s>]/.test(xml)) return { ok: false, errors: [{ path: 'file', message: 'not a Microsoft Project XML file' }] };
   const hpd = +(tag(xml, 'MinutesPerDay') ?? 480) / 60 || 8;

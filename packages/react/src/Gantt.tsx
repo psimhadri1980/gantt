@@ -1,3 +1,8 @@
+/**
+ * The core Gantt component and its view. `CoreGantt` owns the working document and the operation pipeline;
+ * `GanttView` draws the toolbar, grid, timeline, links and details panel and handles every interaction.
+ * The public `<Gantt>` (GanttRoot.tsx) wraps it with access resolution and the Proposal workflow.
+ */
 import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
@@ -24,6 +29,10 @@ import { fromCsv, fromMsProject, fromXlsx, MSPDI_FIELDS, TABLE_FIELDS, toCsv, to
 import { Backlog, LoadPanel, type BacklogItem } from './resources.tsx';
 import './gantt.css';
 
+/**
+ * Props of the core Gantt component: the roadmap, how it is shown (zoom, theme, locale, panels, columns,
+ * templates), what may be changed (read-only, access evaluator, interception), and callbacks for every change.
+ */
 export interface GanttProps {
   data: RoadmapDocument;
   zoom?: string;
@@ -119,6 +128,7 @@ export interface GanttProps {
   scaleRange?: { start?: string; end?: string };
 }
 export type { GridColumn, CellProps, GanttViewState, SavedView };
+/** The file formats the Export menu offers. */
 export type ExportFormat = 'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi';
 
 /** Imperative handle (H3): `const ref = useRef<GanttHandle>(null); <Gantt ref={ref} … />`. */
@@ -134,6 +144,9 @@ export interface GanttHandle {
   redo: () => Promise<void>;
 }
 
+/**
+ * How the pipeline reaches the mounted view to apply view operations (zoom, scroll, selection) and read its state.
+ */
 interface ViewBridge {
   apply: (op: ViewOperation) => void;
   getSelection: () => SelectionTarget[];
@@ -142,6 +155,7 @@ interface ViewBridge {
   fit: () => void;
 }
 
+/** What a custom toolbar receives: the zoom and its setter, Today and Fit, critical path and schedule controls. */
 export interface ToolbarProps {
   zoom: string; levels: ZoomLevel[]; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void;
   /** Critical path highlighting (C2). */
@@ -160,7 +174,9 @@ const DAY_CHUNK = 64;
 const OVERSCAN_PX = 400;
 const GRID_MIN = 160;
 
+/** A run of consecutive rows rendered together (the unit of virtual scrolling). */
 export interface Block { index: number; start: number; rows: RowLayout[] }
+/** The actions rows, bars and links call on the view: selection, expansion, focus and the context menu. */
 export interface Api {
   /** `rangeTo`: select every row from the anchor to this row index (Shift+click, D14). */
   select: (t: SelectionTarget, additive: boolean, rangeTo?: number) => void;
@@ -174,7 +190,12 @@ export interface Api {
   finishEdit: (id: string, value: string | null) => void;
   menu: (x: number, y: number, t: SelectionTarget) => void;
 }
+/** Comparison mode: the placement of the version compared against and which tasks were added or changed. */
 interface Compare { base: Placement; diff: Map<string, 'added' | 'changed'> }
+/**
+ * Everything a row, bar or link needs to draw itself, shared through one object so memoized blocks re-render
+ * only when something they show changes.
+ */
 export interface Ctx {
   cols: GridColumn[]; frozen: number;
   /** Tasks matching the filter; their ancestors are shown for context (D10). */
@@ -240,6 +261,11 @@ export function pinMovedStarts(doc: RoadmapDocument, op: DataOperation): DataOpe
   return { ...op, fields: { ...op.fields, constraint: { type: 'SNET', date: op.fields.start } } };
 }
 
+/**
+ * The operations that apply the schedule (K1: "Schedule" in the toolbar): each task's computed start, with a
+ * stored end dropped so the duration rules. Refused when there is a cycle, or when it would move a task the user
+ * may not change and they may not run the schedule for everyone.
+ */
 export function rescheduleOps(doc: RoadmapDocument, ev?: AccessEvaluator): { ops: DataOperation[] } | { error: string } {
   const s = schedule(doc);
   if (s.cycle) return { error: s.issues[0]!.message };
@@ -261,6 +287,7 @@ export function rescheduleOps(doc: RoadmapDocument, ev?: AccessEvaluator): { ops
 export type ChangeOf = { entity: 'task' | 'link'; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> };
 /** The changes an operation makes, flattened. */
 export function changesOf(op: DataOperation): ChangeOf[] { return flattenOps(op).map(changeOf); }
+/** One single data operation as a change for the access rules (a batch must go through `changesOf`). */
 export function changeOf(op: DataOperation): ChangeOf {
   switch (op.type) {
     case 'batch': throw new Error('use changesOf for a batch');
@@ -273,6 +300,10 @@ export function changeOf(op: DataOperation): ChangeOf {
   }
 }
 
+/**
+ * The Gantt without access resolution: owns the working document and the operation pipeline (permissions,
+ * interception, undo and redo), places the document in the worker and renders the view once it is placed.
+ */
 export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(props, ref) {
   // The working document: starts as props.data, changes through data operations, resets when props.data changes.
   const [working, setWorking] = useState<{ from: RoadmapDocument; doc: RoadmapDocument }>({ from: props.data, doc: props.data });
@@ -340,6 +371,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
   const redoStack = useRef<DataOperation[][]>([]);
   const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
   const syncHistory = () => setHistorySize({ undo: undoStack.current.length, redo: redoStack.current.length });
+  /** Records an accepted operation's inverse for undo (or, while undoing, for redo); a new change clears redo. */
   function recordHistory(r: { operation: GanttOperation; inverse?: DataOperation[] }, ctx: OperationContext) {
     if (!r.inverse?.length || !isDataOperation(r.operation)) return;
     if (ctx.source === 'undo') redoStack.current.push(r.inverse);
@@ -428,6 +460,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
   );
 });
 
+/** Shown when the roadmap cannot be placed or the view fails: the message and a retry button. */
 function ErrorState(props: GanttProps & { message: string; retry: () => void; themeAttr: object }) {
   const m = mergeMessages(props.messages);
   return (
@@ -446,16 +479,23 @@ function ErrorState(props: GanttProps & { message: string; retry: () => void; th
 /** Catches a rendering failure so the host page survives and the user sees the error state with a retry. */
 class ViewBoundary extends Component<{ fallback: (message: string) => ReactNode; children: ReactNode }, { message: string | null }> {
   override state = { message: null as string | null };
+  /** Turns a render error into state, so the fallback shows instead of the component unmounting. */
   static getDerivedStateFromError(e: unknown) { return { message: e instanceof Error ? e.message : String(e) }; }
+  /** Renders the fallback once an error was caught, the children otherwise. */
   override render() { return this.state.message !== null ? this.props.fallback(this.state.message) : this.props.children; }
 }
 
+/** "Saving…", "Saved" or why the last change was not saved (F13), as reported by the host. */
 function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> }) {
   const { t: m } = useI18n();
   const text = state.status === 'saving' ? m.saving : state.status === 'saved' ? m.saved : m.notSaved(state.reason ?? '');
   return <span className={`gx-save gx-save-${state.status}`} role="status">{text}</span>;
 }
 
+/**
+ * The chart itself: toolbar, grid, timeline, links, details panel and dialogs for one placed roadmap. Handles
+ * scrolling and virtualization, zoom, selection, keyboard navigation, editing, drag and drop, and export.
+ */
 function GanttView(props: CoreProps & {
   model: Model; latestDoc: () => RoadmapDocument; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
   loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
@@ -1656,6 +1696,7 @@ const RowBgBlock = memo(function RowBgBlock({ block, selKeys }: { block: Block; 
   })}</>;
 });
 
+/** One block of bars: each task's bar (or bars), progress, labels, baseline, slack and drag handles. */
 const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   { block: Block; ctx: Ctx; api: Api; scale: Scale; bars: ReturnType<typeof barIndex>; focus: { row: number; bar: number } | null }) {
   const { model, selKeys, linkMarked, compare, critical } = ctx;
@@ -1724,6 +1765,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   }))}</>;
 });
 
+/** The links of the visible blocks, drawn as SVG paths with arrowheads; critical and selected links are marked. */
 const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, api, critical }:
   { links: Link[] | undefined; model: Model; bars: ReturnType<typeof barIndex>; scale: Scale; selKeys: ReadonlySet<string>; api: Api; critical: ReadonlySet<string> | null }) {
   const i18n = useI18n();
@@ -1740,6 +1782,7 @@ const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, 
   })}</>;
 });
 
+/** The time scale above the chart: major ticks (months, quarters…) and minor ticks (weeks, days…). */
 const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale, format, weekStart }: { scale: Scale; major: ScaleUnit; minor: ScaleUnit; from: number; to: number; locale?: string; format?: ZoomLevel['format']; weekStart: number }) {
   return <>
     {ticks(scale, major, from, to, locale, format?.[major], weekStart).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
@@ -1747,6 +1790,7 @@ const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, loc
   </>;
 });
 
+/** The chart's background: non-working days shaded and minor-tick grid lines. */
 const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, model, shade }: { scale: Scale; minor: ScaleUnit; from: number; to: number; model: Model; shade: boolean }) {
   const out: ReactNode[] = [];
   const cal = model.placement.calendar;
@@ -1767,13 +1811,16 @@ const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, 
   return <>{out}</>;
 });
 
+/** Position and content of the hover tooltip. */
 interface TipState { x: number; y: number; content: ReactNode }
+/** The hover tooltip. Other components show or hide it through `setterRef` without re-rendering the chart. */
 function Tooltip({ setterRef }: { setterRef: React.RefObject<(s: TipState | null) => void> }) {
   const [tip, setTip] = useState<TipState | null>(null);
   setterRef.current = setTip;
   return tip ? <div className="gx-tooltip" role="tooltip" style={{ left: tip.x + 12, top: tip.y + 14 }}>{tip.content}</div> : null;
 }
 
+/** The built-in toolbar: zoom levels, Today, Fit, critical path and Schedule. */
 function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit, critical, setCritical, runSchedule, scheduleWhyNot }: ToolbarProps) {
   const { t: m } = useI18n();
   return (
@@ -1790,8 +1837,14 @@ function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit, critical, s
   );
 }
 
+/** True when the user asked for reduced motion (scrolling then jumps instead of animating). */
 const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** A string made safe for use in an element id. */
 const cssId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '-');
+/**
+ * The point to keep in place while zooming: the selected task's start if on screen, otherwise today if on
+ * screen, otherwise the centre of the view. Returns its day and its pixel offset in the viewport.
+ */
 function zoomAnchor(el: HTMLElement, sc: Scale, selection: SelectionTarget[], model: Model, today: number): { day: number; px: number } {
   const w = el.clientWidth;
   const onScreen = (day: number) => { const px = (day - sc.origin) * sc.pxPerDay - el.scrollLeft; return px >= 0 && px <= w ? px : null; };
@@ -1811,17 +1864,21 @@ function todayIn(timeZone: string): string {
   try { return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
   catch { return new Date().toISOString().slice(0, 10); }
 }
+/** An ISO date as a day number. */
 const dayOfIso = (iso: string) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86_400_000);
 export { fmtDate };
 
+/** A short spoken label for a selection target, for screen-reader announcements. */
 function labelOf(t: SelectionTarget, mdl: Model, m: GanttMessages) {
   if (t.type === 'link') { const l = mdl.doc.links.find((x) => x.id === t.linkId); return l ? m.connectorName(mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target) : m.typeConnector; }
   return mdl.tasks.get(t.taskId)?.name ?? t.taskId;
 }
+/** Tooltip content for a task: name, dates, working days and progress. */
 function taskTip(t: Task, mdl: Model, { t: m, locale, num, pct }: I18n) {
   const p = mdl.placement.byId.get(t.id)!;
   return <><strong>{t.name}</strong><div>{fmtDate(p.start!, locale)} – {fmtDate(p.end!, locale)} · {m.tipWorkingDays(num(p.duration ?? 0))}</div>{t.type !== 'milestone' && <div>{m.tipComplete(pct(p.progress))}</div>}</>;
 }
+/** Tooltip content for a link: its type and lag, and a sentence saying what it means. */
 function linkTip(l: Link, mdl: Model, { t: m }: I18n) {
   return <><strong>{m.linkType[l.type]}{l.lag ? ` +${l.lag}` : ''}</strong><div>{m.linkSentence[l.type](mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target)}</div></>;
 }

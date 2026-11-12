@@ -7,13 +7,19 @@ import type { Model } from './layout.ts';
  * A view is plain JSON so the host can store and share it (for example in the URL).
  */
 export interface ViewSort { field: string; dir: 'asc' | 'desc' }
+/** What the user filtered by: free text, and for each field the values to keep. */
 export interface ViewFilter {
   /** Matches name, id or WBS code, ignoring case. */
   text?: string;
   /** Field → accepted values (compared as text). A task must match every listed field. */
   fields?: Record<string, string[]>;
 }
+/** A grid column's width and visibility as the user left them. */
 export interface ColumnState { id: string; width?: number; hidden?: boolean }
+/**
+ * Everything a user can change about how the roadmap is shown (sorting, filtering, grouping, columns),
+ * kept per user and restorable as a saved view (D9–D11, D19).
+ */
 export interface GanttViewState {
   sort?: ViewSort;
   filter?: ViewFilter;
@@ -28,9 +34,11 @@ export interface GanttViewState {
   zoom?: string;
   compact?: boolean;
 }
+/** A named view the user saved. */
 export interface SavedView { id: string; name: string; view: GanttViewState }
 
 export const GROUP_PREFIX = '\u0001group:';
+/** True for the id of a group header row (rows made by "group by", not tasks). */
 export const isGroupId = (id: string) => id.startsWith(GROUP_PREFIX);
 
 /** The value of a field for sorting, filtering and grouping: placed dates and progress for the computed fields. */
@@ -48,8 +56,12 @@ export function fieldValue(m: Model, id: string, field: string): unknown {
   }
 }
 
+/** A value as text for comparison; missing values become the empty string. */
 const text = (v: unknown) => v === undefined || v === null ? '' : String(v);
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+/**
+ * Compares two field values: empty values last, numbers numerically, text naturally ("Task 2" before "Task 10").
+ */
 function compare(a: unknown, b: unknown): number {
   const ae = a === undefined || a === null || a === '', be = b === undefined || b === null || b === '';
   if (ae || be) return ae === be ? 0 : ae ? 1 : -1; // empty values last in either direction
@@ -57,6 +69,7 @@ function compare(a: unknown, b: unknown): number {
   return collator.compare(text(a), text(b));
 }
 
+/** True when the task's name, id or WBS code contains the search text (ignoring case and surrounding spaces). */
 export function matchesText(m: Model, id: string, q: string): boolean {
   const t = m.tasks.get(id); if (!t) return false;
   const s = q.trim().toLowerCase(); if (!s) return true;
@@ -72,6 +85,9 @@ export function findTasks(m: Model, q: string): string[] {
   return out;
 }
 
+/**
+ * True when the view changes what is shown (a sort, a group or a non-empty filter), so the UI can offer "Reset view".
+ */
 export function isViewActive(v: GanttViewState | undefined): boolean {
   return !!v && (!!v.sort || !!v.groupBy || !!v.filter?.text?.trim() || Object.values(v.filter?.fields ?? {}).some((x) => x.length > 0));
 }

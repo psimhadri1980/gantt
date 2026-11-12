@@ -1,1 +1,1 @@
-{"name":"@gantt/access","version":"0.1.0","private":true,"type":"module","main":"src/index.ts","types":"src/index.ts","dependencies":{}}
+{"name": "@gantt/access", "description": "Access control: rules, the permission evaluator, per-user filtering of a roadmap, and checks of individual changes.", "version": "0.1.0", "private": true, "type": "module", "main": "src/index.ts", "types": "src/index.ts", "dependencies": {}}

@@ -1,10 +1,18 @@
+/**
+ * Excel import and export (I3) without a library: an .xlsx is a ZIP of XML files. Writing produces one sheet
+ * with inline strings; reading takes the first sheet and resolves shared strings.
+ */
 import type { RoadmapDocument } from '@gantt/contract';
 import { docFromTable, tableFromDoc, type ImportResult } from './table.ts';
 import { readZip, writeZip } from './zip.ts';
 
+/** Escapes text for XML attribute and element content. */
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** Reverses XML escaping, including numeric character references. */
 const unesc = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&amp;/g, '&');
+/** A spreadsheet column name for a 0-based index: 0 → A, 25 → Z, 26 → AA. */
 const colName = (i: number) => { let s = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
+/** The 0-based column index of a cell reference such as "AB12". */
 const colIndex = (ref: string) => { let n = 0; for (const ch of ref.replace(/\d+/g, '')) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
 
 /** A workbook with one sheet, "Tasks" (I3). Numbers are numbers, everything else inline text. */
@@ -63,7 +71,9 @@ export async function readXlsx(bytes: Uint8Array): Promise<string[][]> {
   return rows;
 }
 
+/** The roadmap as an Excel workbook (bytes of an .xlsx file). */
 export const toXlsx = (doc: RoadmapDocument) => writeXlsx(tableFromDoc(doc));
+/** Reads an Excel workbook into a roadmap; any failure to read the file is returned as an error, not thrown. */
 export async function fromXlsx(bytes: Uint8Array, base: Parameters<typeof docFromTable>[1]): Promise<ImportResult> {
   try { return docFromTable(await readXlsx(bytes), base); }
   catch (e) { return { ok: false, errors: [{ path: 'file', message: (e as Error).message }] }; }

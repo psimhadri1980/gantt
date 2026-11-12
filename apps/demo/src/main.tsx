@@ -1,3 +1,7 @@
+/**
+ * The demo application: every sample roadmap and option of the Gantt on one page, used for manual testing,
+ * the end-to-end tests (scripts/e2e.mjs) and the benchmarks. `?sample=` picks the sample.
+ */
 import { StrictMode, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Gantt, HOUR_ZOOM, memoryBackend, germanMessages, ZOOM_LEVELS, type GridColumn, type AccessRules, type GanttHandle, type GanttKinds, type GanttOperation } from '@gantt/react';
@@ -30,11 +34,14 @@ const hostColumns: GridColumn[] = [{
   id: 'owner', label: 'Owner', width: 90, field: 'owner',
   cell: ({ task }) => <span className="demo-owner">{task.owner ? `@${task.owner}` : '—'}</span>,
 }];
+/** A bar template (G7): the task name with its progress, replacing the default label. */
 const BarTemplate = ({ task, placed }: { task: { name: string }; placed: { progress: number } }) =>
   <span className="gx-bar-label demo-bar-tpl">{task.name} · {Math.round(placed.progress * 100)}%</span>;
+/** A tooltip template (G7): the default tooltip plus the task owner. */
 const TooltipTemplate = ({ task, Default }: { task: { owner?: string }; Default: ReactNode }) =>
   <>{Default}<div className="demo-tip-tpl">Owner: {task.owner ?? 'nobody'}</div></>;
 
+/** The demo's samples, chosen with the Sample menu or `?sample=` in the URL. */
 type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid' | 'depth' | 'resources';
 
 // Resources (Phase 9): three people, one part-time on a Mon–Wed calendar, assigned so that Pat is
@@ -83,6 +90,7 @@ const rules = roles as Record<string, AccessRules>;
 const DAY = 86_400_000;
 const USERS: [string, string][] = [['alice', 'Alice (planner)'], ['bob', 'Bob (reviewer)'], ['carol', 'Carol (approver)'], ['dave', 'Dave (progress only)'],
   ['erin', 'Erin (viewer, no crews)'], ['frank', 'Frank (admin)'], ['mallory', 'Mallory (no access)']];
+/** The demo page: a toolbar to pick the sample, theme, language and options, and the Gantt below it. */
 function App() {
   const [sample, setSample] = useState<SampleId>(() => (new URLSearchParams(location.search).get('sample') as SampleId) || 'small');
   // Proposal workflow on a mock backend (M7): one service per separation-of-duties setting, with a clock the demo can move.

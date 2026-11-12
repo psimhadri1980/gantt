@@ -19,6 +19,7 @@ export interface Pick {
   seq: number;
 }
 
+/** Anything that carries Proposal changes and, optionally, the versions already picked for conflicts. */
 interface WithChanges { changes: ProposalChange[]; picks?: Pick[] }
 
 /** A delete conflicts with every other change of the task. */
@@ -31,6 +32,7 @@ export function groupsOf(c: ProposalChange): string[] {
   return [...new Set(Object.keys(c.fields ?? {}).map(fieldGroup))];
 }
 
+/** One task changed by two people at once (K11): which field groups clash, and both versions of each. */
 export interface ConcurrentChange {
   taskId: string;
   /** Field groups changed by more than one user (or "delete" against any change). */
@@ -105,6 +107,7 @@ export function touched(p: WithChanges): Map<string, Set<string>> {
   return m;
 }
 
+/** A task that this Proposal and another open Proposal both change in the same field group. */
 export interface ParallelOverlap { taskId: string; groups: string[]; proposalId: string }
 
 /** Tasks this Proposal changes in the same field group as other open Proposals (K7: a warning, K9). */
@@ -125,6 +128,9 @@ export function parallelOverlaps(p: WithChanges & { id: string }, others: (WithC
 // ---------- Refresh (K16–K20) ----------
 
 export interface IncomingChange { taskId: string; name: string; kind: 'added' | 'removed' | 'changed'; groups: string[] }
+/**
+ * A task that a refresh brings in a change for while this Proposal changes it too, with both versions per group.
+ */
 export interface RefreshOverlap {
   taskId: string;
   name: string;
@@ -169,6 +175,9 @@ export function refreshOverlaps(base: RoadmapDocument, current: RoadmapDocument,
   return out;
 }
 
+/**
+ * The side chosen for a field group of a task: per group, or for the whole task, or (for a delete) the delete choice.
+ */
 const choiceFor = (ch: RefreshChoice | undefined, group: string): 'incoming' | 'mine' | undefined =>
   ch === undefined ? undefined : typeof ch === 'string' ? ch : ch[group] ?? ch[DELETE];
 

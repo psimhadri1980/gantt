@@ -1,5 +1,7 @@
 # @gantt/interchange
 
+Import and export: CSV, Excel (.xlsx) and Microsoft Project XML, with no third-party libraries.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 21 exports.
@@ -7,6 +9,8 @@ Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand
 ## Column
 
 *type* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
+
+One column name of the import/export table.
 
 ```ts
 export type Column = (typeof COLUMNS)[number];
@@ -27,6 +31,8 @@ const COLUMNS: readonly ['id', 'name', 'type', 'parent', 'kind', 'start', 'durat
 
 *function* · [packages/interchange/src/zip.ts](../../packages/interchange/src/zip.ts)
 
+The CRC-32 checksum of the bytes (the checksum ZIP stores for every file).
+
 ```ts
 export function crc32(b: Uint8Array): number
 ```
@@ -46,6 +52,8 @@ export function docFromTable(table: string[][], base: Pick<RoadmapDocument, 'con
 
 *const* · [packages/interchange/src/csv.ts](../../packages/interchange/src/csv.ts)
 
+Reads CSV text into a roadmap.
+
 ```ts
 const fromCsv: (text: string, base: Parameters<typeof docFromTable>[1]) => ImportResult
 ```
@@ -53,6 +61,9 @@ const fromCsv: (text: string, base: Parameters<typeof docFromTable>[1]) => Impor
 ## fromMsProject
 
 *function* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
+
+Reads Microsoft Project XML (MSPDI) into a roadmap: outline levels become the tree, durations are converted with
+the file's minutes per day, and predecessors become links. `base` supplies what the file does not (roadmap id…).
 
 ```ts
 export function fromMsProject(xml: string, base?: Partial<RoadmapDocument>): MsImport
@@ -62,6 +73,8 @@ export function fromMsProject(xml: string, base?: Partial<RoadmapDocument>): MsI
 
 *function* · [packages/interchange/src/xlsx.ts](../../packages/interchange/src/xlsx.ts)
 
+Reads an Excel workbook into a roadmap; any failure to read the file is returned as an error, not thrown.
+
 ```ts
 export async function fromXlsx(bytes: Uint8Array, base: Parameters<typeof docFromTable>[1]): Promise<ImportResult>
 ```
@@ -70,6 +83,8 @@ export async function fromXlsx(bytes: Uint8Array, base: Parameters<typeof docFro
 
 *type* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
 
+The roadmap read from a table, with warnings, or the reasons it was refused.
+
 ```ts
 export type ImportResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
 ```
@@ -77,6 +92,8 @@ export type ImportResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] }
 ## MsImport
 
 *type* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
+
+The roadmap read from a Project file, with warnings, or the reasons it was refused.
 
 ```ts
 export type MsImport = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
@@ -116,6 +133,9 @@ export async function readXlsx(bytes: Uint8Array): Promise<string[][]>
 
 *function* · [packages/interchange/src/zip.ts](../../packages/interchange/src/zip.ts)
 
+Reads a ZIP archive into a map of file name to bytes. Handles stored and deflated entries; finds the entries
+through the central directory at the end of the file.
+
 ```ts
 export async function readZip(bytes: Uint8Array): Promise<Map<string, Uint8Array>>
 ```
@@ -134,6 +154,9 @@ const TABLE_FIELDS: { task: string[]; link: string[]; }
 
 *function* · [packages/interchange/src/table.ts](../../packages/interchange/src/table.ts)
 
+The roadmap as a table: a header row of `COLUMNS`, then one row per task in tree order with its predecessors
+written like Project does ("3FS+2d").
+
 ```ts
 export function tableFromDoc(doc: RoadmapDocument): string[][]
 ```
@@ -141,6 +164,8 @@ export function tableFromDoc(doc: RoadmapDocument): string[][]
 ## toCsv
 
 *const* · [packages/interchange/src/csv.ts](../../packages/interchange/src/csv.ts)
+
+The roadmap as CSV text. Starts with a byte-order mark so Excel reads it as UTF-8.
 
 ```ts
 const toCsv: (doc: RoadmapDocument) => string
@@ -150,6 +175,9 @@ const toCsv: (doc: RoadmapDocument) => string
 
 *function* · [packages/interchange/src/msproject.ts](../../packages/interchange/src/msproject.ts)
 
+Writes the roadmap as Microsoft Project XML (MSPDI): tasks in outline order with WBS, dates, durations, progress,
+milestones and predecessors. Ids and owners round-trip through the Text1 and Text2 fields.
+
 ```ts
 export function toMsProject(doc: RoadmapDocument): string
 ```
@@ -157,6 +185,8 @@ export function toMsProject(doc: RoadmapDocument): string
 ## toXlsx
 
 *const* · [packages/interchange/src/xlsx.ts](../../packages/interchange/src/xlsx.ts)
+
+The roadmap as an Excel workbook (bytes of an .xlsx file).
 
 ```ts
 const toXlsx: (doc: RoadmapDocument) => Uint8Array<ArrayBufferLike>
@@ -185,6 +215,8 @@ export function writeXlsx(rows: string[][], sheet = 'Tasks'): Uint8Array
 ## writeZip
 
 *function* · [packages/interchange/src/zip.ts](../../packages/interchange/src/zip.ts)
+
+Writes a ZIP archive with the files stored uncompressed (enough for an .xlsx, which Excel opens either way).
 
 ```ts
 export function writeZip(files: { name: string; data: Uint8Array | string }[]): Uint8Array

@@ -1,5 +1,6 @@
 {
   "name": "@gantt/ssr-example",
+  "description": "Server rendering example: react-dom/server output hydrated in the browser.",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,5 +1,6 @@
 {
   "name": "@gantt/demo",
+  "description": "The demo application: every sample and option of the Gantt on one page; also the target of the end-to-end tests and benchmarks.",
   "private": true,
   "type": "module",
   "scripts": {

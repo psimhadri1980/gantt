@@ -9,6 +9,7 @@ let worker: Worker | null | undefined;
 let seq = 0;
 const pending = new Map<number, { resolve: (p: never) => void; reject: (e: Error) => void }>();
 
+/** The shared engine worker, started on first use; null where workers are unavailable or failed to start. */
 function getWorker(): Worker | null {
   if (worker !== undefined) return worker;
   try {
@@ -28,6 +29,10 @@ function getWorker(): Worker | null {
   return worker;
 }
 
+/**
+ * Places a roadmap in the worker and expands the compact result. Falls back to the main thread when there is
+ * no worker or the worker fails, so the result is the same either way.
+ */
 export async function placeOffThread(doc: RoadmapDocument): Promise<Placement> {
   const w = getWorker();
   if (!w) return place(doc);

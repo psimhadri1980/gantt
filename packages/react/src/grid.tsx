@@ -1,3 +1,7 @@
+/**
+ * The tree grid (D7, D8, F4): built-in and host columns, the header (sort, resize, reorder, column menu) and the
+ * rows, rendered in blocks for virtual scrolling, with inline editing and the placeholder row for new tasks.
+ */
 import { memo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
 import type { Task } from '@gantt/contract';
 import type { DayNum, PlacedTask } from '@gantt/engine';
@@ -5,6 +9,7 @@ import { formatDay, isGroupId, type ColumnState, type Model, type RowLayout, typ
 import { useI18n, type GanttMessages, type I18n } from './i18n.ts';
 import type { Api, Block, Ctx } from './Gantt.tsx';
 
+/** A date in the grid's short form ("13 Nov 26"). */
 export const fmtDate = (d: DayNum, locale?: string) => formatDay(d, locale, { day: 'numeric', month: 'short', year: '2-digit' });
 
 /** What a cell template receives (G7). */
@@ -33,6 +38,9 @@ export interface GridColumn {
 
 const ACTION = 'add';
 
+/**
+ * The built-in columns: WBS code, name, start, duration and the add-task button, labelled in the current language.
+ */
 export function builtinColumns(m: GanttMessages): GridColumn[] {
   return [
     { id: 'wbs', label: m.colWbs, width: 56, minWidth: 40, field: 'wbs', text: ({ row }) => row.wbs },
@@ -70,7 +78,9 @@ export function columnState(all: GridColumn[], shown: GridColumn[]): ColumnState
   return [...shown.map((c) => ({ id: c.id, width: c.width })), ...all.filter((c) => !ids.has(c.id)).map((c) => ({ id: c.id, hidden: true }))];
 }
 
+/** The CSS grid template for the columns: fixed widths, with the name column taking the remaining space. */
 export const gridTemplate = (cols: GridColumn[]) => cols.map((c) => (c.id === 'name' ? `minmax(${c.width}px, 1fr)` : `${c.width}px`)).join(' ');
+/** Total width of the columns in pixels. */
 export const gridWidth = (cols: GridColumn[]) => cols.reduce((s, c) => s + c.width, 0);
 
 /** Left offsets of the frozen columns (sticky while the grid scrolls sideways). */
@@ -80,6 +90,10 @@ export function frozenStyle(cols: GridColumn[], frozen: number, i: number): CSSP
   return { position: 'sticky', insetInlineStart: left, zIndex: 1 };
 }
 
+/**
+ * What the grid header needs: the columns, how many are frozen, the sort, and callbacks for sort, resize,
+ * reorder and the column menu.
+ */
 export interface HeaderProps {
   cols: GridColumn[];
   frozen: number;
@@ -90,6 +104,7 @@ export interface HeaderProps {
   onMenu: (col: GridColumn, x: number, y: number) => void;
 }
 
+/** The grid's header row: click to sort, drag an edge to resize, drag a header to reorder, open the column menu. */
 export function GridHeader({ cols, frozen, sort, onSort, onResize, onReorder, onMenu }: HeaderProps) {
   const { t: m } = useI18n();
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -155,6 +170,7 @@ function NameCell({ r, t, ctx, api }: { r: RowLayout; t: Task; ctx: Ctx; api: Ap
   </>;
 }
 
+/** One block of grid rows (rows are rendered in blocks so scrolling re-renders only what enters the screen). */
 export const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: { block: Block; ctx: Ctx; api: Api; focusRow: number }) {
   const { model, selKeys, linkMarked, compare, cols, frozen, matches } = ctx;
   const i18n = useI18n();

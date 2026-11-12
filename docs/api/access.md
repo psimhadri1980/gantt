@@ -1,5 +1,7 @@
 # @gantt/access
 
+Access control: rules, the permission evaluator, per-user filtering of a roadmap, and checks of individual changes.
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 17 exports.
@@ -73,6 +75,8 @@ export function checkChange(ev: AccessEvaluator, c: ChangeLike, task: TaskLike |
 
 *type* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
+A host-provided check for rules that depend on the data (for example "only before the freeze date").
+
 ```ts
 export type Condition = (ctx: AccessContext & { subject: Subject }) => boolean;
 ```
@@ -80,6 +84,8 @@ export type Condition = (ctx: AccessContext & { subject: Subject }) => boolean;
 ## Decision
 
 *interface* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
+
+The answer to "may this happen?", with the reason when it may not.
 
 ```ts
 export interface Decision { allowed: boolean; reason?: string }
@@ -122,6 +128,8 @@ export function mergeAccess(staticRules: AccessRules | null | undefined, resolve
 
 *type* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
+One permission name, such as 'view', 'task.modify' or 'proposal.approve'.
+
 ```ts
 export type Permission = (typeof PERMISSIONS)[number];
 ```
@@ -150,6 +158,8 @@ export function permissionsForChange(c: ChangeLike): { permission: Permission; f
 
 *interface* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
+One access rule: allow or deny some permissions, for some roles, within a scope, optionally under a condition.
+
 ```ts
 export interface Rule {
   effect: 'allow' | 'deny';
@@ -168,6 +178,8 @@ export interface Rule {
 
 *interface* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
+Where a rule applies: projects, and tasks by id, group, type, owner or kind. Empty means everywhere.
+
 ```ts
 export interface RuleScope {
   projects?: string[];
@@ -181,6 +193,8 @@ export interface RuleScope {
 
 *interface* · [packages/access/src/types.ts](../../packages/access/src/types.ts)
 
+Who is asking: a user id with the roles and groups that rules can match.
+
 ```ts
 export interface Subject { id: string; roles?: string[]; groups?: string[] }
 ```
@@ -188,6 +202,8 @@ export interface Subject { id: string; roles?: string[]; groups?: string[] }
 ## taskContext
 
 *const* · [packages/access/src/document.ts](../../packages/access/src/document.ts)
+
+The access context for a task: its project and the task fields rules can match on.
 
 ```ts
 const taskContext: (t: TaskLike, project?: string) => AccessContext

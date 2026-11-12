@@ -1,5 +1,7 @@
 # @gantt/proposals
 
+The Proposal model: lifecycle and deadlines, applying and comparing changes, concurrent and parallel change detection, and refresh (rebase).
+
 Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
 
 39 exports.
@@ -32,6 +34,8 @@ export function changesBetween(from: RoadmapDocument, to: RoadmapDocument): Omit
 
 *function* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
 
+Checks the configured time limits; returns the problem, or null when every limit is a positive whole number of days.
+
 ```ts
 export function checkLimits(l: ProposalLimits): string | null
 ```
@@ -39,6 +43,8 @@ export function checkLimits(l: ProposalLimits): string | null
 ## ConcurrentChange
 
 *interface* · [packages/proposals/src/concurrency.ts](../../packages/proposals/src/concurrency.ts)
+
+One task changed by two people at once (K11): which field groups clash, and both versions of each.
 
 ```ts
 export interface ConcurrentChange {
@@ -64,6 +70,8 @@ export function concurrentChanges(p: WithChanges): ConcurrentChange[]
 ## createProposal
 
 *function* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
+
+A new Draft Proposal, with the preparation deadline counted from now.
 
 ```ts
 export function createProposal(p: { id: string; name: string; roadmapId: string; owner: string; baseVersion: number; now: number; limits: ProposalLimits; derivedFrom?: string; changes?: ProposalChange[] }): ProposalRecord
@@ -142,6 +150,8 @@ export function groupsOf(c: ProposalChange): string[]
 
 *interface* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
 
+One step in a Proposal's history: when, by whom, which action, and the comment given.
+
 ```ts
 export interface HistoryEntry {
   at: string;
@@ -179,6 +189,8 @@ export function incomingChanges(from: RoadmapDocument, to: RoadmapDocument): Inc
 
 *const* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
 
+True while the owner can still edit the Proposal's changes.
+
 ```ts
 const isEditable: (s: ProposalState) => s is 'Draft' | 'Returned'
 ```
@@ -186,6 +198,8 @@ const isEditable: (s: ProposalState) => s is 'Draft' | 'Returned'
 ## isOpen
 
 *const* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
+
+True while a Proposal can still change state (not approved, rejected or discarded).
 
 ```ts
 const isOpen: (s: ProposalState) => s is 'Draft' | 'Returned' | 'Submitted' | 'Reviewed'
@@ -195,6 +209,8 @@ const isOpen: (s: ProposalState) => s is 'Draft' | 'Returned' | 'Submitted' | 'R
 
 *type* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
 
+The actions that move a Proposal through its lifecycle (each needs its own permission).
+
 ```ts
 export type LifecycleAction = 'submit' | 'withdraw' | 'review' | 'approve' | 'return' | 'reject' | 'discard';
 ```
@@ -202,6 +218,8 @@ export type LifecycleAction = 'submit' | 'withdraw' | 'review' | 'approve' | 're
 ## ParallelOverlap
 
 *interface* · [packages/proposals/src/concurrency.ts](../../packages/proposals/src/concurrency.ts)
+
+A task that this Proposal and another open Proposal both change in the same field group.
 
 ```ts
 export interface ParallelOverlap { taskId: string; groups: string[]; proposalId: string }
@@ -220,6 +238,8 @@ export function parallelOverlaps(p: WithChanges & { id: string }, others: (WithC
 ## Phase
 
 *type* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
+
+Which part of the workflow a Proposal is in; each phase has its own time limit.
 
 ```ts
 export type Phase = 'preparing' | 'review' | 'approval';
@@ -258,6 +278,9 @@ export interface ProposalLimits { draftDays: number; reviewDays: number; approva
 ## ProposalRecord
 
 *interface* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
+
+A Proposal as the service stores it: identity, owner, state, the version it is based on, its changes,
+its deadlines and history, and what it looked like before the last refresh (for undoing that refresh).
 
 ```ts
 export interface ProposalRecord {
@@ -341,6 +364,8 @@ export type RefreshChoice = 'incoming' | 'mine' | Record<string, 'incoming' | 'm
 
 *interface* · [packages/proposals/src/concurrency.ts](../../packages/proposals/src/concurrency.ts)
 
+A task that a refresh brings in a change for while this Proposal changes it too, with both versions per group.
+
 ```ts
 export interface RefreshOverlap {
   taskId: string;
@@ -366,6 +391,8 @@ export function refreshOverlaps(base: RoadmapDocument, current: RoadmapDocument,
 ## TaskDiff
 
 *interface* · [packages/proposals/src/changes.ts](../../packages/proposals/src/changes.ts)
+
+How one task differs between two versions: added, removed, or changed (with the changed fields).
 
 ```ts
 export interface TaskDiff { id: string; kind: 'added' | 'removed' | 'changed'; fields: string[] }
@@ -395,6 +422,8 @@ export function transition(p: ProposalRecord, action: LifecycleAction, ctx: Tran
 
 *interface* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
 
+Who is acting, when, why, and the settings that apply, for one lifecycle transition.
+
 ```ts
 export interface TransitionContext {
   actor: string;
@@ -412,6 +441,8 @@ export interface TransitionContext {
 ## TransitionResult
 
 *type* · [packages/proposals/src/lifecycle.ts](../../packages/proposals/src/lifecycle.ts)
+
+The new Proposal after a transition, or the reason it is not allowed.
 
 ```ts
 export type TransitionResult = { ok: true; proposal: ProposalRecord } | { ok: false; reason: string };
