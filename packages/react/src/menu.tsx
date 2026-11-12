@@ -23,11 +23,13 @@ export function ContextMenu({ x, y, items, onClose, label }: { x: number; y: num
     if (r.bottom > innerHeight) el.style.top = `${Math.max(4, innerHeight - r.height - 4)}px`;
     el.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
   }, []);
+  // Only on open and close: the caller's onClose changes on every render, and re-running this would move focus away.
+  const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
-    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) closeRef.current(); };
     window.addEventListener('pointerdown', away, true);
     return () => { window.removeEventListener('pointerdown', away, true); (returnTo.current as HTMLElement | null)?.focus?.({ preventScroll: true }); };
-  }, [onClose]);
+  }, []);
   const onKey = (e: React.KeyboardEvent) => {
     const all = [...ref.current!.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
     const i = all.indexOf(document.activeElement as HTMLElement);

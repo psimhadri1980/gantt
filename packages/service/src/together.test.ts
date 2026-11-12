@@ -14,7 +14,7 @@ const current: RoadmapDocument = {
   links: [{ id: 'l1', source: 'a', target: 'b', type: 'FS' }],
 };
 const ALL = ['view', 'view.history', 'task.create', 'task.modify.dates', 'task.modify.progress', 'task.modify.fields', 'task.delete', 'link.create',
-  'proposal.create', 'proposal.edit', 'proposal.refresh', 'proposal.submit', 'proposal.review', 'proposal.approve', 'proposal.return', 'proposal.reject', 'proposal.discard', 'proposal.viewOthers'] as const;
+  'proposal.create', 'proposal.edit', 'proposal.refresh', 'proposal.submit', 'proposal.review', 'proposal.approve', 'proposal.return', 'proposal.reject', 'proposal.discard', 'proposal.viewOthers', 'baseline.save', 'view.baselines'] as const;
 const rule = (id: string, perms: readonly string[]): AccessRules => ({ subject: { id }, rules: [{ effect: 'allow', permissions: [...perms] as AccessRules['rules'][number]['permissions'] }] });
 const users: Record<string, AccessRules> = {
   alice: rule('alice', ALL), bob: rule('bob', ALL), carol: rule('carol', ALL),
@@ -131,5 +131,22 @@ describe('working together on Proposals (Phase 6)', () => {
     const r = svc.refresh('alice', mine.id, {});
     expect(r.behind).toBe(0);
     expect(svc.proposalDocument('alice', mine.id).tasks.find((t) => t.id === 'a')!.name).toBe('A2');
+  });
+});
+
+describe('baselines (Phase 8, B1)', () => {
+  it('saving a baseline needs baseline.save, does not change the plan, and is shown only with view.baselines', () => {
+    const viewer = { subject: { id: 'v' }, rules: [{ effect: 'allow' as const, permissions: ['view' as const] }] };
+    const now = Date.parse('2026-11-02T09:00:00Z');
+    const svc = new RoadmapService({ current, rulesFor: (u) => (u === 'v' ? viewer : users[u] ?? null), now: () => now });
+    expect(() => svc.saveBaseline('v', 'Plan')).toThrow(/baseline.save/);
+    const before = svc.snapshot('alice').version;
+    const b = svc.saveBaseline('alice', 'Kick-off plan');
+    expect(svc.snapshot('alice').version).toBe(before);
+    expect(svc.snapshot('alice').proposals).toEqual([]);
+    expect(svc.snapshot('alice').current!.baselines!.map((x) => x.name)).toEqual(['Kick-off plan']);
+    expect(svc.snapshot('alice').current!.baselines![0]!.tasks.find((t) => t.id === 'a')).toEqual({ id: 'a', start: '2026-11-02', end: '2026-11-04', work: 3 });
+    expect(svc.snapshot('v').current!.baselines).toBeUndefined();
+    expect(b.version).toBe(1);
   });
 });

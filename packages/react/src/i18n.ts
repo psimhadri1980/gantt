@@ -265,6 +265,25 @@ export interface GanttMessages {
   problemsTitle: string;
   noProblems: string;
   lateBy: (n: string) => string;
+  // tracking (Phase 8)
+  baselineLabel: string;
+  baselineNone: string;
+  baselineTip: (name: string, start: string, end: string, diff: string) => string;
+  daysLater: (n: string) => string;
+  daysEarlier: (n: string) => string;
+  sameDates: string;
+  progressLine: string;
+  statusDate: string;
+  progressStatus: Record<'ahead' | 'behind' | 'onTrack', string>;
+  rollups: string;
+  sCurve: string;
+  sCurveTitle: string;
+  planned: string;
+  actual: string;
+  workTotal: (n: string) => string;
+  saveBaseline: string;
+  baselineName: string;
+  baselineSaved: (name: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -516,6 +535,24 @@ export const defaultMessages: GanttMessages = {
   problemsTitle: 'Scheduling problems',
   noProblems: 'No scheduling problems.',
   lateBy: (n) => `${n} working days`,
+  baselineLabel: 'Baseline',
+  baselineNone: 'None',
+  baselineTip: (n, a, b, d) => `${n}: ${a} – ${b} (${d})`,
+  daysLater: (n) => `finishes ${n} days later now`,
+  daysEarlier: (n) => `finishes ${n} days earlier now`,
+  sameDates: 'same finish',
+  progressLine: 'Progress line',
+  statusDate: 'Status date',
+  progressStatus: { ahead: 'ahead', behind: 'behind', onTrack: 'on track' },
+  rollups: 'Rollups',
+  sCurve: 'S-curve',
+  sCurveTitle: 'Work over time (working days)',
+  planned: 'Planned',
+  actual: 'Actual',
+  workTotal: (n) => `${n} working days in total`,
+  saveBaseline: 'Save baseline',
+  baselineName: 'Baseline name',
+  baselineSaved: (n) => `Baseline “${n}” saved`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
@@ -531,6 +568,7 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     phaseName: { ...defaultMessages.phaseName, ...over.phaseName },
     action: { ...defaultMessages.action, ...over.action },
     groupName: { ...defaultMessages.groupName, ...over.groupName },
+    progressStatus: { ...defaultMessages.progressStatus, ...over.progressStatus },
   };
 }
 

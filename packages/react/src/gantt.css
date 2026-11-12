@@ -310,3 +310,29 @@
 .gx-piece { position: absolute; top: 0; bottom: 0; border-radius: var(--gx-radius); background: var(--gx-task); }
 .gx-problem { padding: 6px 0; border-bottom: 1px solid var(--gx-grid); }
 .gx-problems { max-width: 520px; }
+
+/* ---------- Tracking (Phase 8) ---------- */
+.gx-baseline { position: absolute; height: 4px; border-radius: 2px; background: var(--gx-muted); opacity: 0.75; z-index: 1; }
+.gx-baseline.gx-late { background: var(--gx-diff); }
+.gx-rollup { position: absolute; top: 25%; bottom: 25%; background: var(--gx-task); border-radius: 2px; opacity: 0.85; outline: 1px solid var(--gx-bg); }
+.gx-rollup.gx-rollup-ms { width: 8px; margin-left: -4px; transform: rotate(45deg); top: 20%; bottom: auto; height: 8px; background: var(--gx-critical); }
+.gx-progress-line { position: absolute; overflow: visible; pointer-events: none; z-index: 4; }
+.gx-progress-line polyline { fill: none; stroke: var(--gx-critical); stroke-width: 1.5; }
+.gx-progress-line .gx-pl-ahead { fill: #1a7f37; }
+.gx-progress-line .gx-pl-behind { fill: var(--gx-critical); }
+.gx-scurve { padding: 8px 12px; border-bottom: 1px solid var(--gx-border); background: var(--gx-bg); }
+.gx-scurve-fig { margin: 0; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.gx-scurve-svg { width: min(640px, 100%); height: auto; }
+.gx-sc-grid { stroke: var(--gx-grid); }
+.gx-sc-axis { font-size: 10px; fill: var(--gx-muted); }
+.gx-sc-status { stroke: var(--gx-critical); stroke-dasharray: 3 3; }
+polyline.gx-sc-planned, polyline.gx-sc-actual, polyline.gx-sc-baseline { fill: none; stroke-width: 2; }
+polyline.gx-sc-planned { stroke: var(--gx-task); }
+polyline.gx-sc-actual { stroke: #1a7f37; }
+polyline.gx-sc-baseline { stroke: var(--gx-muted); stroke-dasharray: 5 3; }
+.gx-sc-legend { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.gx-sc-key { display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; }
+.gx-sc-key.gx-sc-planned { background: var(--gx-task); }
+.gx-sc-key.gx-sc-actual { background: #1a7f37; }
+.gx-sc-key.gx-sc-baseline { background: var(--gx-muted); }
+.gx-inline-label { display: inline-flex; align-items: center; gap: 4px; }

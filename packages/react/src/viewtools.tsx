@@ -13,11 +13,13 @@ export function Popover({ x, y, label, onClose, children }: { x: number; y: numb
     if (r.bottom > innerHeight) el.style.top = `${Math.max(4, innerHeight - r.height - 4)}px`;
     el.querySelector<HTMLElement>('input, button, select')?.focus();
   }, []);
+  // Only on open and close: the caller's onClose changes on every render, and re-running this would move focus away.
+  const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
-    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) closeRef.current(); };
     window.addEventListener('pointerdown', away, true);
     return () => { window.removeEventListener('pointerdown', away, true); (returnTo.current as HTMLElement | null)?.focus?.({ preventScroll: true }); };
-  }, [onClose]);
+  }, []);
   return (
     <div ref={ref} className="gx-popover" role="dialog" aria-label={label} style={{ left: x, top: y }}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>

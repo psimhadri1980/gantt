@@ -22,6 +22,8 @@ export interface GanttBackend {
   refreshPreview(id: string, choices: Record<string, RefreshChoice>): Promise<RefreshPreview>;
   refresh(id: string, choices: Record<string, RefreshChoice>): Promise<ProposalSummary>;
   undoRefresh(id: string): Promise<ProposalSummary>;
+  /** Saves a baseline of Current (B1); needs `baseline.save`. */
+  saveBaseline(name: string, version?: number): Promise<{ id: string; name: string; version: number }>;
   /** Live events (proposalStale etc.). Returns an unsubscribe function. */
   subscribe(fn: (e: ServiceEvent) => void): () => void;
 }
@@ -52,6 +54,7 @@ export function memoryBackend(service: RoadmapService, userId: string): GanttBac
     refreshPreview: (id, choices) => wrap(() => service.refreshPreview(userId, id, choices)),
     refresh: (id, choices) => wrap(() => service.refresh(userId, id, choices)),
     undoRefresh: (id) => wrap(() => service.undoRefresh(userId, id)),
+    saveBaseline: (name, version) => wrap(() => service.saveBaseline(userId, name, version)),
     subscribe: (fn) => service.subscribeFor(userId, fn),
   };
 }
@@ -80,6 +83,7 @@ export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof f
     refreshPreview: (id, choices) => call('POST', `/proposals/${encodeURIComponent(id)}/refresh-preview`, { choices }),
     refresh: (id, choices) => call('POST', `/proposals/${encodeURIComponent(id)}/refresh`, { choices }),
     undoRefresh: (id) => call('POST', `/proposals/${encodeURIComponent(id)}/undo-refresh`, {}),
+    saveBaseline: (name, version) => call('POST', '/baselines', { name, version }),
     subscribe: (fn) => {
       if (typeof EventSource === 'undefined') return () => {};
       const es = new EventSource(`${baseUrl}/events?user=${encodeURIComponent(userId)}`);

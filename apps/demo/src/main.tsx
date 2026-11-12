@@ -58,6 +58,15 @@ const depth = {
     { id: 'x1', name: 'Parked idea', type: 'task', parent: null, start: '2026-11-10', duration: 5, mode: 'inactive' },
   ],
   links: [...small.links, { id: 'lh', source: 'h1', target: 'h2', type: 'FS' }, { id: 'lh2', source: 't17', target: 'h2', type: 'FS' }],
+  // The kick-off plan (B1): the build was meant to finish a week earlier.
+  baselines: [{
+    id: 'kickoff', name: 'Kick-off plan', version: 10, savedAt: '2026-10-20T09:00:00Z', savedBy: 'carol',
+    tasks: [
+      { id: 't7', start: '2026-11-09', end: '2026-11-18', work: 8 }, { id: 't8', start: '2026-11-19', end: '2026-12-04', work: 12 },
+      { id: 't9', start: '2026-11-23', end: '2026-11-30', work: 6 }, { id: 't2', start: '2026-11-02', end: '2026-11-13', work: 10 },
+      { id: 't3', start: '2026-11-09', end: '2026-11-13', work: 5 }, { id: 't16', start: '2026-12-07', end: '2026-12-11', work: 5 },
+    ],
+  }],
 };
 // Fiscal quarters (G2): the year starts in April.
 const fiscal = { ...ZOOM_LEVELS[1]!, id: 'fiscal', label: 'Fiscal', format: { quarter: (d: number) => { const dt = new Date(d * 86_400_000); const m = dt.getUTCMonth(); const fy = m >= 3 ? dt.getUTCFullYear() + 1 : dt.getUTCFullYear(); return `FY${String(fy).slice(2)} Q${Math.floor(((m + 9) % 12) / 3) + 1}`; } } };

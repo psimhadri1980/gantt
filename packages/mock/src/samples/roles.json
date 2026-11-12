@@ -1,49 +1,208 @@
 {
   "alice": {
-    "subject": { "id": "alice", "roles": ["planner"] },
+    "subject": {
+      "id": "alice",
+      "roles": [
+        "planner"
+      ]
+    },
     "rules": [
-      { "effect": "allow", "permissions": ["view", "view.history", "view.fields", "proposal.create", "proposal.edit", "proposal.refresh", "proposal.submit", "proposal.discard",
-        "task.create", "task.modify.dates", "task.modify.progress", "task.modify.fields", "task.reorder", "task.delete",
-        "link.create", "link.modify", "link.delete", "constraint.edit"] },
-      { "effect": "allow", "permissions": ["proposal.discard"], "scope": { "proposals": "own" } }
+      {
+        "effect": "allow",
+        "permissions": [
+          "view",
+          "view.history",
+          "view.fields",
+          "proposal.create",
+          "proposal.edit",
+          "proposal.refresh",
+          "proposal.submit",
+          "proposal.discard",
+          "task.create",
+          "task.modify.dates",
+          "task.modify.progress",
+          "task.modify.fields",
+          "task.reorder",
+          "task.delete",
+          "link.create",
+          "link.modify",
+          "link.delete",
+          "constraint.edit",
+          "view.baselines"
+        ]
+      },
+      {
+        "effect": "allow",
+        "permissions": [
+          "proposal.discard"
+        ],
+        "scope": {
+          "proposals": "own"
+        }
+      }
     ]
   },
   "bob": {
-    "subject": { "id": "bob", "roles": ["reviewer"] },
+    "subject": {
+      "id": "bob",
+      "roles": [
+        "reviewer"
+      ]
+    },
     "rules": [
-      { "effect": "allow", "permissions": ["view", "view.history", "view.fields", "proposal.viewOthers", "proposal.review", "proposal.return", "proposal.reject"] }
+      {
+        "effect": "allow",
+        "permissions": [
+          "view",
+          "view.history",
+          "view.fields",
+          "proposal.viewOthers",
+          "proposal.review",
+          "proposal.return",
+          "proposal.reject",
+          "view.baselines"
+        ]
+      }
     ]
   },
   "carol": {
-    "subject": { "id": "carol", "roles": ["approver"] },
+    "subject": {
+      "id": "carol",
+      "roles": [
+        "approver"
+      ]
+    },
     "rules": [
-      { "effect": "allow", "permissions": ["view", "view.history", "view.fields", "proposal.viewOthers", "proposal.review", "proposal.approve", "proposal.refresh", "proposal.return", "proposal.reject"] }
+      {
+        "effect": "allow",
+        "permissions": [
+          "view",
+          "view.history",
+          "view.fields",
+          "proposal.viewOthers",
+          "proposal.review",
+          "proposal.approve",
+          "proposal.refresh",
+          "baseline.save",
+          "view.baselines",
+          "proposal.return",
+          "proposal.reject"
+        ]
+      }
     ]
   },
   "dave": {
-    "subject": { "id": "dave", "roles": ["progress-updater"] },
+    "subject": {
+      "id": "dave",
+      "roles": [
+        "progress-updater"
+      ]
+    },
     "rules": [
-      { "effect": "allow", "permissions": ["view", "proposal.create", "proposal.edit", "proposal.refresh", "proposal.submit", "proposal.discard", "task.modify.progress"] },
-      { "effect": "allow", "permissions": ["view.fields"], "fields": ["start", "end", "duration", "progress", "owner"] }
+      {
+        "effect": "allow",
+        "permissions": [
+          "view",
+          "proposal.create",
+          "proposal.edit",
+          "proposal.refresh",
+          "proposal.submit",
+          "proposal.discard",
+          "task.modify.progress"
+        ]
+      },
+      {
+        "effect": "allow",
+        "permissions": [
+          "view.fields"
+        ],
+        "fields": [
+          "start",
+          "end",
+          "duration",
+          "progress",
+          "owner"
+        ]
+      }
     ]
   },
   "erin": {
-    "subject": { "id": "erin", "roles": ["viewer"] },
+    "subject": {
+      "id": "erin",
+      "roles": [
+        "viewer"
+      ]
+    },
     "rules": [
-      { "effect": "allow", "permissions": ["view", "view.fields"] },
-      { "effect": "deny", "permissions": ["view"], "scope": { "tasks": { "kinds": ["crew"] } } }
+      {
+        "effect": "allow",
+        "permissions": [
+          "view",
+          "view.fields"
+        ]
+      },
+      {
+        "effect": "deny",
+        "permissions": [
+          "view"
+        ],
+        "scope": {
+          "tasks": {
+            "kinds": [
+              "crew"
+            ]
+          }
+        }
+      }
     ]
   },
   "frank": {
-    "subject": { "id": "frank", "roles": ["admin"] },
+    "subject": {
+      "id": "frank",
+      "roles": [
+        "admin"
+      ]
+    },
     "rules": [
-      { "effect": "allow", "permissions": ["view", "view.history", "view.fields", "proposal.create", "proposal.edit", "proposal.refresh", "proposal.submit", "proposal.review", "proposal.approve",
-        "proposal.return", "proposal.reject", "proposal.discard", "proposal.viewOthers", "task.create", "task.modify.dates", "task.modify.progress",
-        "task.modify.fields", "task.reorder", "task.delete", "link.create", "link.modify", "link.delete", "constraint.edit"] }
+      {
+        "effect": "allow",
+        "permissions": [
+          "view",
+          "view.history",
+          "view.fields",
+          "proposal.create",
+          "proposal.edit",
+          "proposal.refresh",
+          "proposal.submit",
+          "proposal.review",
+          "proposal.approve",
+          "proposal.return",
+          "proposal.reject",
+          "proposal.discard",
+          "proposal.viewOthers",
+          "task.create",
+          "task.modify.dates",
+          "task.modify.progress",
+          "task.modify.fields",
+          "task.reorder",
+          "task.delete",
+          "link.create",
+          "link.modify",
+          "link.delete",
+          "constraint.edit",
+          "baseline.save",
+          "view.baselines"
+        ]
+      }
     ]
   },
   "mallory": {
-    "subject": { "id": "mallory", "roles": ["outsider"] },
+    "subject": {
+      "id": "mallory",
+      "roles": [
+        "outsider"
+      ]
+    },
     "rules": []
   }
 }

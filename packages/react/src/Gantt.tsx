@@ -7,7 +7,7 @@ import {
   copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
   type GanttViewState, type SavedView, type TreeClipboard,
 } from '@gantt/state';
-import { fixesFor, fromDay, place, schedule, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
+import { fixesFor, fromDay, place, progressLine, schedule, sCurve, toDay, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
 import { checkChange, type AccessEvaluator } from '@gantt/access';
 import { placeOffThread, scheduleOffThread } from './engineClient.ts';
 import { DragController, type DragKind } from './drag.ts';
@@ -18,6 +18,7 @@ import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type
 import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBlock, GridHeader, PlaceholderRow, resolveColumns, type CellProps, type GridColumn } from './grid.tsx';
 import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
 import type { PlacedTask } from '@gantt/engine';
+import { ProgressLineLayer, SCurveChart } from './tracking.tsx';
 import './gantt.css';
 
 export interface GanttProps {
@@ -161,6 +162,11 @@ export interface Ctx {
   flags?: ReadonlyMap<string, string>;
   /** Latest finish of tasks with slack, while slack is shown (B4). */
   slack: ReadonlyMap<string, number> | null;
+  /** The chosen baseline's dates per task (B1), and its name. */
+  baseline: ReadonlyMap<string, { start: number; end: number }> | null;
+  baselineName?: string;
+  /** Children drawn on summary bars (A5). */
+  rollups: boolean;
   model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>;
   loadState: ReadonlyMap<string, string>; compare: Compare | null; editing: string | null;
   /** Tasks on the critical path while highlighting is on (C2). */
@@ -743,6 +749,15 @@ function GanttView(props: CoreProps & {
   const [showSlack, setShowSlack] = useState(false);
   const slackEnds = useMemo(() => (showSlack && analysis ? new Map([...analysis.tasks].filter(([, t]) => t.slack > 0).map(([id, t]) => [id, t.lateFinish])) : null), [showSlack, analysis]);
   const [problemsAt, setProblemsAt] = useState<{ x: number; y: number } | null>(null);
+  // Tracking (Phase 8): a baseline under the bars, the progress line and the S-curve on a status date, rollups.
+  const baselines = data.baselines ?? [];
+  const [baselineId, setBaselineId] = useState('');
+  const chosenBaseline = baselines.find((b) => b.id === baselineId);
+  const baselineMap = useMemo(() => (chosenBaseline ? new Map(chosenBaseline.tasks.map((t) => [t.id, { start: toDay(t.start), end: toDay(t.end) }])) : null), [chosenBaseline]);
+  const [showPL, setShowPL] = useState(false);
+  const [plDate, setPlDate] = useState<string | null>(null);
+  const [showRollups, setShowRollups] = useState(false);
+  const [showSCurve, setShowSCurve] = useState(false);
   const critical = useMemo(() => (showCritical && analysis ? new Set([...analysis.tasks].filter(([, t]) => t.critical).map(([id]) => id)) : null), [showCritical, analysis]);
   const criticalLinks = useMemo(() => {
     if (!critical || !analysis) return null;
@@ -761,8 +776,8 @@ function GanttView(props: CoreProps & {
   }, [data, props.evaluator, run, i18n]);
   apiRef.current = api;
   menuRef.current = (x, y, t) => openMenuRef.current(x, y, t);
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate, flags: props.flags, slack: slackEnds }),
-    [slackEnds, model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate, props.flags]);
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate, flags: props.flags, slack: slackEnds, baseline: baselineMap, baselineName: chosenBaseline?.name, rollups: showRollups }),
+    [slackEnds, baselineMap, chosenBaseline, showRollups, model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate, props.flags]);
   // What the user may change, with the reason when not (F14, L4).
   const whyNotEdit = useCallback((taskId: string, field: string): string | null => {
     const ro = props.readOnly;
@@ -1294,6 +1309,9 @@ function GanttView(props: CoreProps & {
   const lb0 = settling ? view.v0 : view.b0, lb1 = settling ? view.v1 : view.b1;
   const longVisible = useMemo(() => linkBuckets.long.filter((x) => x.b1 >= lb0 && x.b0 < lb1).map((x) => x.l), [linkBuckets, lb0, lb1]);
 
+  const statusDay = plDate ? toDay(plDate) : todayDay;
+  const plPoints = useMemo(() => (showPL ? progressLine(baseModel.placement, statusDay) : null), [showPL, baseModel, statusDay]);
+  const curve = useMemo(() => (showSCurve ? sCurve(baseModel.placement, statusDay, chosenBaseline) : null), [showSCurve, baseModel, statusDay, chosenBaseline]);
   if (data.tasks.length === 0) {
     return <div className="gx-root" {...themeAttr} style={{ height }}>{props.emptyState ?? <div className="gx-empty">{m.empty}</div>}</div>;
   }
@@ -1313,6 +1331,16 @@ function GanttView(props: CoreProps & {
           <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit}
             critical={showCritical} setCritical={setShowCritical} runSchedule={runSchedule} scheduleWhyNot={scheduleWhyNot} />
           <button className="gx-btn" aria-pressed={showSlack} onClick={() => setShowSlack((v) => !v)}>{m.slackShow}</button>
+          {baselines.length > 0 && <label className="gx-inline-label">{m.baselineLabel}{' '}
+            <select className="gx-select" value={baselineId} onChange={(e) => setBaselineId(e.target.value)}>
+              <option value="">{m.baselineNone}</option>
+              {baselines.map((b) => <option key={b.id} value={b.id}>{b.name} (v{b.version})</option>)}
+            </select></label>}
+          <button className="gx-btn" aria-pressed={showPL} onClick={() => setShowPL((v) => !v)}>{m.progressLine}</button>
+          {(showPL || showSCurve) && <label className="gx-inline-label">{m.statusDate}{' '}
+            <input className="gx-input" type="date" value={fromDay(statusDay)} onChange={(e) => setPlDate(e.target.value || null)} onKeyDown={(e) => e.stopPropagation()} /></label>}
+          <button className="gx-btn" aria-pressed={showRollups} onClick={() => setShowRollups((v) => !v)}>{m.rollups}</button>
+          <button className="gx-btn" aria-pressed={showSCurve} aria-expanded={showSCurve} onClick={() => setShowSCurve((v) => !v)}>{m.sCurve}</button>
           <button className={`gx-btn${analysis?.issues.length ? ' gx-warn-btn' : ''}`} aria-haspopup="dialog" aria-expanded={!!problemsAt}
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setProblemsAt(problemsAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.problems(i18n.num(analysis?.issues.length ?? 0))}</button>
           <button className="gx-btn" aria-disabled={!props.history.canUndo || undefined} title={props.history.canUndo ? `${m.undo} (Ctrl+Z)` : m.nothingToUndo} onClick={() => void props.history.undo()}>{m.undo}</button>
@@ -1340,6 +1368,7 @@ function GanttView(props: CoreProps & {
           {props.saveState && <SaveIndicator state={props.saveState} />}
         </div>
       )}
+      {curve && <div className="gx-scurve" role="region" aria-label={m.sCurve}><SCurveChart curve={curve} statusDay={statusDay} baselineName={chosenBaseline?.name} /></div>}
       <div className="gx-main">
         <div className="gx-panes">
           {!gridOff && (
@@ -1428,6 +1457,7 @@ function GanttView(props: CoreProps & {
                 </svg>
                 {chartBlocks.map((b) => <BarBlock key={'b' + b.index} block={b} ctx={ctx} api={api} scale={scale} bars={bars}
                   focus={focus.row >= b.start && focus.row < b.start + BLOCK ? focus : null} />)}
+                {plPoints && <ProgressLineLayer rows={chartBlocks.flatMap((b) => b.rows)} points={plPoints} scale={scale} statusDay={statusDay} win={win} />}
               </div>
             </div>
           </div>
@@ -1508,9 +1538,22 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
       ? <div key={t.id + ':slack'} className="gx-slack" aria-hidden style={{ left: x + w, top: pos.y + pos.h / 2 - 2, width: (lateEnd - p.end!) * scale.pxPerDay }} />
       : null;
     const segs = p.segments;
-    return [ghost, slackBar,
+    // The saved plan under the bar (B1), with how the finish moved since.
+    const was2 = ctx.baseline?.get(t.id);
+    const baseBar = was2 ? (() => {
+      const diff = p.end! - was2.end;
+      const d = diff > 0 ? i18n.t.daysLater(i18n.num(diff)) : diff < 0 ? i18n.t.daysEarlier(i18n.num(-diff)) : i18n.t.sameDates;
+      return <div key={t.id + ':base'} className={`gx-baseline${diff > 0 ? ' gx-late' : ''}`} data-task={t.id}
+        title={i18n.t.baselineTip(ctx.baselineName ?? '', fmtDate(was2.start, i18n.locale), fmtDate(was2.end, i18n.locale), d)}
+        style={{ left: xOf(scale, was2.start), top: pos.y + pos.h + 1, width: Math.max(2, (was2.end - was2.start + 1) * scale.pxPerDay) }} />;
+    })() : null;
+    // Rollups (A5): the children on the summary bar.
+    const kids = ctx.rollups && isSummary && !r.lane ? (model.children.get(t.id) ?? []) : [];
+    return [ghost, slackBar, baseBar,
       <div key={t.id} data-task={t.id} className={`${cls}${compare?.diff.has(t.id) ? ' gx-diff' : ''}${segs ? ' gx-split' : ''}`} style={{ left: x, top: pos.y, width: w, height: pos.h }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}>
         {segs && segs.map(([a, b], i) => <span key={i} className="gx-piece" aria-hidden style={{ left: (a - p.start!) * scale.pxPerDay, width: (b - a + 1) * scale.pxPerDay }} />)}
+        {kids.map((k) => { const c = model.placement.byId.get(k); if (!c?.scheduled) return null; const ms = c.task.type === 'milestone';
+          return <span key={k} className={`gx-rollup${ms ? ' gx-rollup-ms' : ''}`} data-task={k} title={c.task.name} style={{ left: (c.start! - p.start!) * scale.pxPerDay, width: ms ? undefined : Math.max(2, (c.end! - c.start! + 1) * scale.pxPerDay) }} />; })}
         {!isSummary && <div className="gx-progress" style={{ width: `${Math.round(p.progress * 100)}%` }} />}
         {ctx.barTemplate && !isGroupId(t.id) ? <ctx.barTemplate task={t} placed={p} /> : <span className={`gx-bar-label${w < 60 ? ' gx-outside' : ''}`}>{t.name}</span>}
         {!isSummary && <>

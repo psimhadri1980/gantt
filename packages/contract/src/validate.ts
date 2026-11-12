@@ -15,7 +15,7 @@ export function isIsoDate(v: unknown): v is string {
 }
 
 const KNOWN: Record<string, string[]> = {
-  root: ['contract', 'roadmap', 'calendars', 'tasks', 'links', 'resources', 'proposals', 'access'],
+  root: ['contract', 'roadmap', 'calendars', 'tasks', 'links', 'resources', 'proposals', 'access', 'baselines'],
   roadmap: ['id', 'name', 'version', 'timeZone', 'start', 'defaultCalendar', 'statusDate'],
   calendar: ['id', 'name', 'workingDays', 'hoursPerDay', 'holidays'],
   task: ['id', 'name', 'type', 'parent', 'kind', 'lane', 'order', 'start', 'duration', 'durationUnit', 'end', 'progress',
@@ -213,6 +213,14 @@ export function validate(input: unknown): ValidationResult {
   if (cycle) err('links', `links form a cycle: ${cycle.join(' → ')}`);
 
   if (input.proposals !== undefined && !Array.isArray(input.proposals)) err('proposals', 'must be an array');
+  list(input, 'baselines', false).forEach((b, i) => {
+    const p = `baselines[${i}]`;
+    if (!isObj(b)) return err(p, 'must be an object');
+    str(b, 'id', p); str(b, 'name', p);
+    if (!Number.isInteger(b.version)) err(`${p}.version`, 'must be an integer');
+    if (!Array.isArray(b.tasks)) err(`${p}.tasks`, 'must be an array');
+    else (b.tasks as unknown[]).forEach((t, j) => { if (!isObj(t)) return err(`${p}.tasks[${j}]`, 'must be an object'); date(t, 'start', `${p}.tasks[${j}]`, true); date(t, 'end', `${p}.tasks[${j}]`, true); });
+  });
   if (input.access !== undefined && !isObj(input.access)) err('access', 'must be an object');
 
   return errors.length ? { ok: false, errors, warnings } : { ok: true, doc: input as unknown as RoadmapDocument, warnings };

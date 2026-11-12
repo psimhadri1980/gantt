@@ -25,6 +25,9 @@
     "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
     "resources": { "type": "array", "items": { "$ref": "#/$defs/resource" } },
     "proposals": { "type": "array", "items": { "$ref": "#/$defs/proposal" } },
+    "baselines": { "type": "array", "description": "Saved plans (B1).", "items": { "type": "object", "required": ["id", "name", "version", "tasks"], "properties": {
+      "id": { "type": "string" }, "name": { "type": "string" }, "version": { "type": "integer" }, "savedAt": { "type": "string" }, "savedBy": { "type": "string" },
+      "tasks": { "type": "array", "items": { "type": "object", "required": ["id", "start", "end"], "properties": { "id": { "type": "string" }, "start": { "$ref": "#/$defs/date" }, "end": { "$ref": "#/$defs/date" }, "work": { "type": "number" } } } } } } },
     "access": {
       "type": "object",
       "required": ["subject", "rules"],

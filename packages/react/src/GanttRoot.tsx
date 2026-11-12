@@ -94,6 +94,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   const [compare, setCompare] = useState(false);
   const [save, setSave] = useState<SaveState | undefined>();
   const [statusLine, setStatusLine] = useState('');
+  const [offerBaseline, setOfferBaseline] = useState(false);
   const propsRef = useRef(props); propsRef.current = props;
   // Our own handle as well as the host's, so the panels can jump to a task.
   const inner = useRef<GanttHandle | null>(null);
@@ -112,6 +113,10 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
     } catch (e) { setFailure((e as Error).message); return null; }
   }, [backend]);
 
+  const saveBaseline = useCallback(async (name: string) => {
+    try { const b = await backend.saveBaseline(name); setOfferBaseline(false); setStatusLine(m.baselineSaved(b.name)); await refresh(); await reloadDocRef.current().catch(() => {}); }
+    catch (e) { setStatusLine((e as Error).message); }
+  }, [backend, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
   // First load, configuration status, and live events (K14, K15): each event goes to its on… callback.
   useEffect(() => {
     let first = true;
@@ -139,6 +144,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
     if (d) setDoc({ key: v.kind === 'current' ? 'current' : v.kind === 'proposal' ? `p:${v.id}` : `v:${v.version}`, doc: { ...d } });
   }, [backend]);
   const viewRef = useRef(view); viewRef.current = view;
+  const reloadDocRef = useRef(reloadDoc); reloadDocRef.current = reloadDoc;
 
   const proposal = view.kind === 'proposal' ? snap?.proposals.find((p) => p.id === view.id) : undefined;
   // Someone else changed, picked or refreshed this Proposal: show their version at once (H5).
@@ -255,7 +261,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
       const r = await backend.act(p.id, action, reason);
       setStatusLine('');
       if (action === 'discard') setView({ kind: 'current' });
-      if (action === 'approve') setView({ kind: 'current' });
+      if (action === 'approve') { setView({ kind: 'current' }); setOfferBaseline(true); } // a baseline is offered on every approval (B1)
       await refresh();
       void r;
     } catch (e) { setStatusLine((e as Error).message); }
@@ -269,6 +275,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
 
   const header = (
     <ProposalBar snap={snap} view={view} setView={setView} proposal={proposal} compare={compare} setCompare={setCompare} act={act}
+      offerBaseline={offerBaseline} setOfferBaseline={setOfferBaseline} saveBaseline={(n) => void saveBaseline(n)}
       cc={cc} pick={(t, k) => void pick(t, k)} onRefresh={(p) => void openRefresh(p)} onUndoRefresh={(p) => void undoRefresh(p)} now={Date.now()}
       selectTask={(id) => { const h = inner.current; if (!h) return; h.scrollToTask(id); void h.run({ type: 'selection.set', selection: [{ type: 'row', taskId: id }] }); }}
       statusLine={statusLine} setStatusLine={setStatusLine} choice={choice} m={m} locale={props.locale} hide={props.deniedControls === 'hide'}
@@ -292,7 +299,8 @@ const editableOwn = (s: Snapshot, user: string) => s.proposals.filter((p) => p.o
 
 const ACTIONS: LifecycleAction[] = ['submit', 'withdraw', 'review', 'approve', 'return', 'reject', 'discard'];
 
-function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide, cc, pick, onRefresh, onUndoRefresh, now, selectTask }: {
+function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide, cc, pick, onRefresh, onUndoRefresh, now, selectTask, offerBaseline, setOfferBaseline, saveBaseline }: {
+  offerBaseline: boolean; setOfferBaseline: (b: boolean) => void; saveBaseline: (name: string) => void;
   cc: Concurrency | null; pick: (taskId: string, keep: string) => void; onRefresh: (p: ProposalSummary) => void; onUndoRefresh: (p: ProposalSummary) => void;
   now: number; selectTask: (id: string) => void;
   snap: Snapshot; view: View; setView: (v: View) => void; proposal?: ProposalSummary; compare: boolean; setCompare: (b: boolean) => void;
@@ -330,6 +338,8 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
             </optgroup>}
           </select>
         </label>
+        {view.kind === 'current' && snap.current && snap.can['baseline.save'] && !offerBaseline &&
+          <button className="gx-btn" data-action="save-baseline" onClick={() => setOfferBaseline(true)}>{m.saveBaseline}</button>}
         <button className="gx-btn" aria-pressed={panel === 'list'} aria-expanded={panel === 'list'} onClick={() => setPanel(panel === 'list' ? null : 'list')}>{m.proposals} ({num(snap.proposals.length)})</button>
         {proposal && <>
           <span className={`gx-chip gx-state gx-state-${proposal.state.toLowerCase()}`}>{m.state[proposal.state] ?? proposal.state}</span>
@@ -394,6 +404,13 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
           <button className="gx-btn gx-primary" onClick={() => choose(null)}>{m.newProposal}</button>
           <button className="gx-btn" onClick={() => choose(undefined)}>{m.cancel}</button>
         </div>
+      )}
+      {offerBaseline && snap.can['baseline.save'] && snap.current && (
+        <form className="gx-pbar-row" aria-label={m.saveBaseline} onSubmit={(e) => { e.preventDefault(); const v = new FormData(e.currentTarget).get('name'); if (typeof v === 'string' && v.trim()) saveBaseline(v.trim()); }}>
+          <label>{m.baselineName} <input className="gx-input" name="name" defaultValue={`Version ${snap.version}`} autoFocus required /></label>
+          <button className="gx-btn gx-primary" type="submit">{m.saveBaseline}</button>
+          <button className="gx-btn" type="button" onClick={() => setOfferBaseline(false)}>{m.cancel}</button>
+        </form>
       )}
       {statusLine && <div className="gx-pbar-row gx-pbar-status" role="status">{statusLine}</div>}
       {panel === 'list' && <div className="gx-pbar-panel" role="region" aria-label={m.proposals}>

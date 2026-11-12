@@ -417,25 +417,25 @@ await test('reorder rows by dragging, indent and outdent, copy and paste with in
   const training = await row(page, 'Training').locator('.gx-grip').boundingBox();
   await page.mouse.move(training.x + 10, training.y + training.height / 2); await page.mouse.down();
   await page.mouse.move(pilot.x + 10, pilot.y + 3, { steps: 6 }); await page.mouse.up();
-  await page.waitForFunction(() => { const d = window.gantt.current.getData(); const o = (n) => d.tasks.find((t) => t.name === n).order; return o('Training') < o('Pilot'); });
+  await page.waitForFunction(() => { const d = window.gantt.current.getData(); const o = (n) => d.tasks.find((t) => t.name === n).order; return o('Training') < o('Pilot'); }, null, { timeout: 8000 }).catch(async () => { throw new Error('row drag did not reorder: ' + await page.locator('.gx-notice').textContent().catch(() => '')); });
   await page.waitForFunction(() => { const n = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task]')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((r) => r.querySelector('.gx-name-text')?.textContent); return n.indexOf('Training') < n.indexOf('Pilot'); }, null, { timeout: 5000 })
     .catch(async () => { throw new Error(`Training not above Pilot: ${(await rowNames(page)).join(', ')}`); });
   // Indent goes under the row above (Rollout); a task linked to the row above would be refused with the reason.
   await row(page, 'Decommission legacy').click();
   await page.keyboard.press('Control+]');
-  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.name === 'Decommission legacy').parent === 't15');
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.name === 'Decommission legacy').parent === 't15', null, { timeout: 8000 }).catch(async () => { throw new Error('indent: ' + await page.locator('.gx-notice').textContent().catch(() => '')); });
   await page.keyboard.press('Control+[');
-  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.name === 'Decommission legacy').parent === null);
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.name === 'Decommission legacy').parent === null, null, { timeout: 8000 }).catch(async () => { throw new Error('outdent: ' + await page.locator('.gx-notice').textContent().catch(() => '')); });
   // Copy Core platform (4 tasks, 2 links between them) and paste it.
   const before = await dataLen(page);
   await row(page, 'Core platform').click();
   await page.keyboard.press('Control+c');
   await page.keyboard.press('Control+v');
-  await page.waitForFunction((n) => window.gantt.current.getData().tasks.length === n + 4, before.tasks);
+  await page.waitForFunction((n) => window.gantt.current.getData().tasks.length === n + 4, before.tasks, { timeout: 8000 }).catch(() => { throw new Error('step: ' + '(n) => window.gantt.current.getData().tasks.length === n + 4'); });
   const after = await dataLen(page);
   expectEq(after.links - before.links, 2, 'the links inside the copied subtree are copied');
   await page.keyboard.press('Control+z');
-  await page.waitForFunction((n) => window.gantt.current.getData().tasks.length === n, before.tasks);
+  await page.waitForFunction((n) => window.gantt.current.getData().tasks.length === n, before.tasks, { timeout: 8000 }).catch(() => { throw new Error('step: ' + '(n) => window.gantt.current.getData().tasks.length === n'); });
 });
 
 await test('sort by a column header, filter, group and find (D9, D10, D11, D19)', async (page) => {
@@ -582,6 +582,44 @@ await test('custom scale labels and a fixed start boundary (G2, G3)', async (pag
   await page.waitForTimeout(200);
   const first = await page.evaluate(() => [...document.querySelectorAll('.gx-tick.gx-minor')].find((t) => parseFloat(t.style.left) <= 0 && parseFloat(t.style.left) + parseFloat(t.style.width) > 0)?.textContent);
   expectEq(first, 'W44 · 26 Oct', 'the scale starts at the fixed boundary');
+});
+
+// ---------- Phase 8: tracking ----------
+await test('a baseline renders under the current bars, with how the finish moved (B1)', async (page) => {
+  await depthSample(page);
+  await page.getByLabel('Baseline').selectOption({ label: 'Kick-off plan (v10)' });
+  const base = page.locator('.gx-baseline[data-task="t7"]');
+  await base.waitFor();
+  const bb = await base.boundingBox(), bar = await barBox(page, 't7');
+  if (!(bb.y >= bar.y + bar.height - 1 && bb.y < bar.y + bar.height + 8)) throw new Error(`not under the bar: ${JSON.stringify({ bb, bar })}`);
+  if (!(bb.x < bar.x)) throw new Error('the baseline should start earlier than the current bar');
+  if (!/later now/.test(await base.getAttribute('title'))) throw new Error('no finish difference');
+});
+
+await test('S-curve totals match the data (B2)', async (page) => {
+  await depthSample(page);
+  await page.getByRole('button', { name: 'S-curve' }).click();
+  await page.getByLabel('Baseline').selectOption({ label: 'Kick-off plan (v10)' });
+  const shown = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-total]')].map((e) => [e.dataset.total, parseFloat(e.textContent)])));
+  // The same totals, computed here from the data alone.
+  const want = await page.evaluate(() => {
+    const d = window.gantt.current.getData();
+    const parents = new Set(d.tasks.map((t) => t.parent));
+    const leaves = d.tasks.filter((t) => !parents.has(t.id) && t.type === 'task' && t.start && t.mode !== 'inactive');
+    const work = (t) => (t.durationUnit === 'hour' ? (t.duration ?? 8) / 8 : t.duration ?? 1);
+    const r = (v) => Math.round(v * 10) / 10;
+    return { planned: r(leaves.reduce((a, t) => a + work(t), 0)), actual: r(leaves.reduce((a, t) => a + work(t) * (t.progress ?? 0), 0)), baseline: r(d.baselines[0].tasks.reduce((a, t) => a + t.work, 0)) };
+  });
+  expectEq(JSON.stringify(shown), JSON.stringify(want), 'totals');
+});
+
+await test('progress line on a chosen date marks tasks ahead and behind; rollups show children on summaries (B3, A5)', async (page) => {
+  await depthSample(page);
+  await page.getByRole('button', { name: 'Progress line' }).click();
+  await page.getByLabel('Status date').fill('2026-12-01');
+  await page.locator('.gx-progress-line circle.gx-pl-behind').first().waitFor();
+  await page.getByRole('button', { name: 'Rollups' }).click();
+  expectEq(await page.locator('.gx-bar[data-task="t6"] .gx-rollup').count(), 3, 'Core platform shows its three tasks');
 });
 
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------
@@ -781,6 +819,22 @@ await test('parallel Proposals are warned; approving one makes the other stale l
   // The refresh can be undone.
   await page.getByRole('button', { name: 'Undo refresh' }).click();
   await page.getByText('Current has changed: 1 newer version').first().waitFor();
+});
+
+await test('a baseline is offered on approval and needs baseline.save (B1, K22)', async (page) => {
+  await proposals(page);
+  const id = await page.evaluate(() => { const p = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.5 } }]); window.svc.act('alice', p.id, 'submit'); return p.id; });
+  if (await page.locator('[data-action="save-baseline"]').count()) throw new Error('Alice may not save baselines');
+  await userSelect(page).selectOption('carol');
+  await viewProposal(page, id);
+  await page.locator('.gx-pbar [data-action="approve"]').click();
+  const form = page.getByRole('form', { name: 'Save baseline' });
+  await form.waitFor();
+  await form.getByLabel('Baseline name').fill('After review');
+  await form.getByRole('button', { name: 'Save baseline' }).click();
+  await page.getByText('Baseline “After review” saved').waitFor();
+  await page.getByLabel('Baseline').locator('option', { hasText: 'After review' }).waitFor({ state: 'attached' });
+  expectEq(await page.evaluate(() => window.svc.snapshot('carol').version), 13, 'saving a baseline does not create a version');
 });
 
 await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', async (page) => {

@@ -1,11 +1,11 @@
-import type { ProposalChange, RoadmapDocument, Task } from '@gantt/contract';
+import type { Baseline, ProposalChange, RoadmapDocument, Task } from '@gantt/contract';
 import { AccessEvaluator, checkChange, filterDocument, type AccessRules, type Condition, type Permission } from '@gantt/access';
 import {
   applyChanges, concurrentChanges, createProposal, DEFAULT_LIMITS, effectiveChanges, expireIfDue, incomingChanges, isEditable, isOpen, parallelOverlaps,
   rebase, recordChanges, refreshOverlaps, transition, undecided, versionOf, whyNot,
   type LifecycleAction, type ProposalLimits, type ProposalRecord, type RefreshChoice, type RefreshOverlap,
 } from '@gantt/proposals';
-import { schedule } from '@gantt/engine';
+import { place, schedule, takeBaseline } from '@gantt/engine';
 
 /** A change as a client sends it; the service stamps who and when. */
 export type ChangeInput = Omit<ProposalChange, 'by' | 'at'>;
@@ -24,7 +24,8 @@ export type ServiceEvent =
   /** Two users changed the same field group of a task, here or in a parallel Proposal (K7, H5). */
   | { type: 'concurrentChange'; proposal: ProposalSummary; actor: string; taskIds: string[]; parallel: boolean }
   | { type: 'proposalRefreshed'; proposal: ProposalSummary; actor: string; fromVersion: number; toVersion: number }
-  | { type: 'currentChanged'; version: number };
+  | { type: 'currentChanged'; version: number }
+  | { type: 'baselineSaved'; baseline: { id: string; name: string; version: number }; actor: string };
 
 /** What a client sees of a Proposal: everything but the raw change list, which comes with the document. */
 export type ProposalSummary = Omit<ProposalRecord, 'changes' | 'beforeRefresh'> & {
@@ -105,6 +106,7 @@ export class RoadmapService {
   private currentVersion = 0;
   private proposals = new Map<string, ProposalRecord>();
   private warned = new Set<string>();
+  private baselines: Baseline[] = [];
   private seq = 0;
   private listeners = new Set<(e: ServiceEvent) => void>();
   private readonly now: () => number;
@@ -121,6 +123,7 @@ export class RoadmapService {
     const r = opts.current?.roadmap ?? opts.roadmap;
     if (!r) throw new Error('Either current or roadmap is required');
     this.roadmapInfo = { id: r.id, name: r.name, timeZone: r.timeZone ?? 'UTC', start: r.start ?? new Date(this.now()).toISOString().slice(0, 10) };
+    this.baselines = [...(opts.current?.baselines ?? [])];
     for (const p of opts.current?.proposals ?? []) {
       // Proposals carried in the mock file (M2) are loaded as Drafts or as their stated state.
       const rec = createProposal({ id: p.id, name: p.name, roadmapId: this.roadmapInfo.id, owner: p.owner, baseVersion: p.baseVersion, now: Date.parse(p.createdAt), limits: this.config.limits, changes: p.changes });
@@ -180,10 +183,10 @@ export class RoadmapService {
     this.tick();
     const ev = this.requireView(userId);
     const cur = this.versions.get(this.currentVersion);
-    const perms: Permission[] = ['proposal.create', 'proposal.edit', 'proposal.refresh', 'proposal.submit', 'proposal.review', 'proposal.approve', 'proposal.return', 'proposal.reject', 'proposal.discard', 'proposal.viewOthers', 'view.history'];
+    const perms: Permission[] = ['baseline.save', 'view.baselines', 'proposal.create', 'proposal.edit', 'proposal.refresh', 'proposal.submit', 'proposal.review', 'proposal.approve', 'proposal.return', 'proposal.reject', 'proposal.discard', 'proposal.viewOthers', 'view.history'];
     return {
       config: this.config,
-      current: cur ? filterDocument(cur.doc, ev) : null,
+      current: cur ? this.withBaselines(filterDocument(cur.doc, ev), ev) : null,
       version: this.currentVersion,
       versions: ev.can('view.history') ? [...this.versions].map(([version, v]) => ({ version, at: v.at, by: v.by, proposal: v.proposal })) : [],
       proposals: [...this.proposals.values()].filter((p) => this.canSee(ev, p)).map((p) => this.summaryFor(userId, p)),
@@ -196,7 +199,7 @@ export class RoadmapService {
     const ev = this.requireView(userId);
     const p = this.get(id);
     if (!this.canSee(ev, p)) throw new ServiceError('You may not view this Proposal', 'denied');
-    return filterDocument(this.build(p), ev);
+    return this.withBaselines(filterDocument(this.build(p), ev), ev);
   }
 
   versionDocument(userId: string, version: number): RoadmapDocument {
@@ -317,6 +320,32 @@ export class RoadmapService {
     if (w || action !== 'approve') return w;
     const open = concurrentChanges(p).length;
     return open ? conflictReason(open) : null;
+  }
+
+  // ---------- tracking (Phase 8) ----------
+
+  /**
+   * Saves a baseline of a version of Current (B1, K22): a snapshot, not a change, so no Proposal. Needs
+   * `baseline.save`; the newest version unless another is named.
+   */
+  saveBaseline(userId: string, name: string, version = this.currentVersion): { id: string; name: string; version: number } {
+    const ev = this.requireView(userId);
+    this.require(ev, 'baseline.save');
+    if (!name.trim()) throw new ServiceError('A baseline needs a name', 'invalid');
+    const v = this.versions.get(version);
+    if (!v) throw new ServiceError(`No version ${version}`, 'notFound');
+    const b = takeBaseline(place(v.doc), { id: `b${this.baselines.length + 1}-${Math.random().toString(36).slice(2, 6)}`, name: name.trim(), version, savedAt: new Date(this.now()).toISOString(), savedBy: userId });
+    this.baselines.push(b);
+    const info = { id: b.id, name: b.name, version };
+    this.emit({ type: 'baselineSaved', baseline: info, actor: userId });
+    return info;
+  }
+  /** Baselines go with Current only for users with `view.baselines`, and only for tasks they may view. */
+  private withBaselines(doc: RoadmapDocument, ev: AccessEvaluator): RoadmapDocument {
+    const { baselines: _drop, ...rest } = doc; void _drop;
+    if (!this.baselines.length || !ev.can('view.baselines', { project: this.roadmapInfo.id })) return rest as RoadmapDocument;
+    const seen = new Set(doc.tasks.map((t) => t.id));
+    return { ...rest, baselines: this.baselines.map((b) => ({ ...b, tasks: b.tasks.filter((t) => seen.has(t.id)) })) } as RoadmapDocument;
   }
 
   // ---------- working together (Phase 6) ----------

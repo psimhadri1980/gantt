@@ -108,4 +108,17 @@ export interface RoadmapDocument {
   resources?: Resource[];
   proposals?: Proposal[];
   access?: AccessConfig;
+  /** Saved plans to compare with (B1): snapshots of a version of Current. */
+  baselines?: Baseline[];
+}
+
+/** A snapshot of the plan at a version of Current (B1, K22). Saving one does not change the plan. */
+export interface Baseline {
+  id: string;
+  name: string;
+  /** The version of Current it was taken from. */
+  version: number;
+  savedAt: string;
+  savedBy: string;
+  tasks: { id: string; start: IsoDate; end: IsoDate; work: number }[];
 }
