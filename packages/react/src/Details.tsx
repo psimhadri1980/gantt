@@ -43,17 +43,19 @@ interface Props {
   editLink?: (id: string, fields: Partial<Link>) => unknown;
   /** Bulk field change for a multi-selection (D14), as one operation. */
   editMany?: (ids: string[], fields: Partial<Task>) => unknown;
+  /** Open Proposals of this roadmap, when they come from a backend rather than the file. */
+  openProposals?: number;
 }
 
 const fmt = (d: DayNum | undefined, locale?: string) =>
   d === undefined ? '—' : formatDay(d, locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const readOnly = () => false; // Phase 1: the panel is read-only.
 
-export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis, whyNotLinkEdit, editLink, editMany }: Props) {
+export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis, whyNotLinkEdit, editLink, editMany, openProposals }: Props) {
   const { t: m } = i18n;
   const primary = selection[selection.length - 1];
   let body: ReactNode;
-  if (!primary) body = <RoadmapSummary model={model} analysis={analysis} select={select} />;
+  if (!primary) body = <RoadmapSummary model={model} analysis={analysis} select={select} openProposals={openProposals} />;
   else if (selection.length > 1) body = <Multi model={model} selection={selection} whyNotEdit={whyNotEdit} editMany={editMany} />;
   else if (primary.type === 'link') {
     const l = model.doc.links.find((x) => x.id === primary.linkId);
@@ -263,7 +265,7 @@ function Multi({ model, selection, whyNotEdit, editMany }: { model: Model; selec
   </div>;
 }
 
-function RoadmapSummary({ model, analysis, select }: { model: Model; analysis?: Props['analysis']; select: Props['select'] }) {
+function RoadmapSummary({ model, analysis, select, openProposals }: { model: Model; analysis?: Props['analysis']; select: Props['select']; openProposals?: number }) {
   const { t: m, locale, num, pct } = useI18n();
   const r = model.doc.roadmap, span = model.placement.span;
   const tops = model.children.get(null) ?? [];
@@ -279,7 +281,7 @@ function RoadmapSummary({ model, analysis, select }: { model: Model; analysis?: 
       <Field label={m.tasks}>{num(model.doc.tasks.length)}</Field>
       <Field label={m.connectors}>{num(model.doc.links.length)}</Field>
       <Field label={m.unscheduled}>{num(unscheduled)}</Field>
-      <Field label={m.openProposals}>{num(model.doc.proposals?.length ?? 0)}</Field>
+      <Field label={m.openProposals}>{num(openProposals ?? model.doc.proposals?.length ?? 0)}</Field>
     </dl></section>
     {analysis && analysis.issues.length > 0 && <section><h4>{m.issues}</h4><ul className="gx-list">
       {analysis.issues.slice(0, 20).map((i, k) => <li key={k}>{i.linkId ? <button className="gx-link-btn" onClick={() => select({ type: 'link', linkId: i.linkId! })}>{i.message}</button>

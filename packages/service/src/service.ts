@@ -1,7 +1,7 @@
 import type { Baseline, ProposalChange, RoadmapDocument, Task } from '@gantt/contract';
 import { AccessEvaluator, checkChange, filterDocument, type AccessRules, type Condition, type Permission } from '@gantt/access';
 import {
-  applyChanges, concurrentChanges, createProposal, DEFAULT_LIMITS, effectiveChanges, expireIfDue, incomingChanges, isEditable, isOpen, parallelOverlaps,
+  applyChanges, changesBetween, concurrentChanges, createProposal, DEFAULT_LIMITS, effectiveChanges, expireIfDue, incomingChanges, isEditable, isOpen, parallelOverlaps,
   rebase, recordChanges, refreshOverlaps, transition, undecided, versionOf, whyNot,
   type LifecycleAction, type ProposalLimits, type ProposalRecord, type RefreshChoice, type RefreshOverlap,
 } from '@gantt/proposals';
@@ -514,6 +514,33 @@ export class RoadmapService {
     });
     const applied = applyChanges(this.baseOf(p), p.changes);
     if (!applied.ok) throw new ServiceError(`Its changes do not apply to the newest Current: ${applied.reason}`, 'conflict');
+    this.proposals.set(p.id, p);
+    this.emit({ type: 'proposalCreated', proposal: this.summary(p), actor: userId });
+    return this.summary(p);
+  }
+
+  /**
+   * Restores an earlier version (K22): never directly, always as a new Proposal on the newest Current that
+   * contains the changes back to that version. Needs `view.history` and `proposal.create`.
+   */
+  restoreVersion(userId: string, version: number): ProposalSummary {
+    this.tick();
+    const ev = this.requireView(userId);
+    this.require(ev, 'view.history');
+    this.require(ev, 'proposal.create');
+    const old = this.versions.get(version);
+    if (!old) throw new ServiceError(`No version ${version}`, 'notFound');
+    if (version === this.currentVersion) throw new ServiceError('This is already the current version', 'invalid');
+    const at = new Date(this.now()).toISOString();
+    const changes = changesBetween(this.baseOf({ baseVersion: this.currentVersion } as ProposalRecord), old.doc).map((c) => ({ ...c, by: userId, at }));
+    if (!changes.length) throw new ServiceError('Nothing differs from the current version', 'invalid');
+    const p = createProposal({
+      id: `p${++this.seq}-${Math.random().toString(36).slice(2, 6)}`, name: `Restore version ${version}`, roadmapId: this.roadmapInfo.id, owner: userId,
+      baseVersion: this.currentVersion, now: this.now(), limits: this.config.limits, changes,
+    });
+    p.history[0] = { ...p.history[0]!, reason: `restores version ${version}` };
+    const applied = applyChanges(this.baseOf(p), p.changes);
+    if (!applied.ok) throw new ServiceError(`Version ${version} cannot be restored: ${applied.reason}`, 'conflict');
     this.proposals.set(p.id, p);
     this.emit({ type: 'proposalCreated', proposal: this.summary(p), actor: userId });
     return this.summary(p);

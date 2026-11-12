@@ -275,6 +275,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
 
   const header = (
     <ProposalBar snap={snap} view={view} setView={setView} proposal={proposal} compare={compare} setCompare={setCompare} act={act}
+      restoreVersion={(v) => void (async () => { try { const p = await backend.restoreVersion(v); await refresh(); setView({ kind: 'proposal', id: p.id }); setStatusLine(''); } catch (e) { setStatusLine((e as Error).message); } })()}
       offerBaseline={offerBaseline} setOfferBaseline={setOfferBaseline} saveBaseline={(n) => void saveBaseline(n)}
       cc={cc} pick={(t, k) => void pick(t, k)} onRefresh={(p) => void openRefresh(p)} onUndoRefresh={(p) => void undoRefresh(p)} now={Date.now()}
       selectTask={(id) => { const h = inner.current; if (!h) return; h.scrollToTask(id); void h.run({ type: 'selection.set', selection: [{ type: 'row', taskId: id }] }); }}
@@ -286,7 +287,8 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   return (
     <>
     <CoreGantt {...props} ref={setRef} data={shown ?? empty} evaluator={props.evaluator} header={header}
-      readOnly={readOnly} saveState={save} onCommit={onCommit} undoScope={viewKey} flags={view.kind === 'proposal' ? flags : undefined}
+      readOnly={readOnly} saveState={save} onCommit={onCommit} undoScope={viewKey}
+      openProposals={snap.proposals.filter((p) => ['Draft', 'Returned', 'Submitted', 'Reviewed'].includes(p.state)).length} flags={view.kind === 'proposal' ? flags : undefined}
       compareWith={compare && view.kind === 'proposal' && snap.current ? snap.current : undefined}
       emptyState={<>{header}<div className="gx-empty">{view.kind === 'current' && !snap.current ? m.currentNone : shown ? m.empty : m.loading}</div></>} />
     {dlg && <div className="gx-root gx-layer" data-theme={props.theme}><RefreshDialog preview={dlg.preview} choices={dlg.choices} setChoices={setChoices} m={m} busy={dlg.busy} error={dlg.error}
@@ -299,8 +301,8 @@ const editableOwn = (s: Snapshot, user: string) => s.proposals.filter((p) => p.o
 
 const ACTIONS: LifecycleAction[] = ['submit', 'withdraw', 'review', 'approve', 'return', 'reject', 'discard'];
 
-function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide, cc, pick, onRefresh, onUndoRefresh, now, selectTask, offerBaseline, setOfferBaseline, saveBaseline }: {
-  offerBaseline: boolean; setOfferBaseline: (b: boolean) => void; saveBaseline: (name: string) => void;
+function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, statusLine, setStatusLine, choice, choose, m, locale, hide, cc, pick, onRefresh, onUndoRefresh, now, selectTask, restoreVersion, offerBaseline, setOfferBaseline, saveBaseline }: {
+  restoreVersion: (v: number) => void; offerBaseline: boolean; setOfferBaseline: (b: boolean) => void; saveBaseline: (name: string) => void;
   cc: Concurrency | null; pick: (taskId: string, keep: string) => void; onRefresh: (p: ProposalSummary) => void; onUndoRefresh: (p: ProposalSummary) => void;
   now: number; selectTask: (id: string) => void;
   snap: Snapshot; view: View; setView: (v: View) => void; proposal?: ProposalSummary; compare: boolean; setCompare: (b: boolean) => void;
@@ -338,6 +340,8 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
             </optgroup>}
           </select>
         </label>
+        {view.kind === 'version' && snap.can['proposal.create'] &&
+          <button className="gx-btn" data-action="restore" onClick={() => restoreVersion(view.version)}>{m.restoreVersion}</button>}
         {view.kind === 'current' && snap.current && snap.can['baseline.save'] && !offerBaseline &&
           <button className="gx-btn" data-action="save-baseline" onClick={() => setOfferBaseline(true)}>{m.saveBaseline}</button>}
         <button className="gx-btn" aria-pressed={panel === 'list'} aria-expanded={panel === 'list'} onClick={() => setPanel(panel === 'list' ? null : 'list')}>{m.proposals} ({num(snap.proposals.length)})</button>

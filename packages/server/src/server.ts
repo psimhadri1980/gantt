@@ -25,6 +25,7 @@ export function createGanttServer(service: RoadmapService, opts: { allowOrigin?:
       if (req.method === 'GET' && parts[0] === 'events') return events(req, res, service, user);
       if (req.method === 'GET' && parts[0] === 'proposals' && parts[2] === 'document') return send(res, 200, service.proposalDocument(user, parts[1]!));
       if (req.method === 'GET' && parts[0] === 'proposals' && parts[2] === 'concurrency') return send(res, 200, service.concurrency(user, parts[1]!));
+      if (req.method === 'POST' && parts[0] === 'versions' && parts[2] === 'restore') return send(res, 201, service.restoreVersion(user, Number(parts[1])));
       if (req.method === 'POST' && parts[0] === 'baselines') { const body = await readJson(req); return send(res, 201, service.saveBaseline(user, String(body.name ?? ''), body.version === undefined ? undefined : Number(body.version))); }
       if (req.method === 'POST' && parts[0] === 'proposals') {
         const body = await readJson(req);

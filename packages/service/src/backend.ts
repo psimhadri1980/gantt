@@ -24,6 +24,8 @@ export interface GanttBackend {
   undoRefresh(id: string): Promise<ProposalSummary>;
   /** Saves a baseline of Current (B1); needs `baseline.save`. */
   saveBaseline(name: string, version?: number): Promise<{ id: string; name: string; version: number }>;
+  /** Opens a new Proposal that restores an earlier version (K22). */
+  restoreVersion(version: number): Promise<ProposalSummary>;
   /** Live events (proposalStale etc.). Returns an unsubscribe function. */
   subscribe(fn: (e: ServiceEvent) => void): () => void;
 }
@@ -55,6 +57,7 @@ export function memoryBackend(service: RoadmapService, userId: string): GanttBac
     refresh: (id, choices) => wrap(() => service.refresh(userId, id, choices)),
     undoRefresh: (id) => wrap(() => service.undoRefresh(userId, id)),
     saveBaseline: (name, version) => wrap(() => service.saveBaseline(userId, name, version)),
+    restoreVersion: (v) => wrap(() => service.restoreVersion(userId, v)),
     subscribe: (fn) => service.subscribeFor(userId, fn),
   };
 }
@@ -84,6 +87,7 @@ export function httpBackend(baseUrl: string, userId: string, fetchImpl: typeof f
     refresh: (id, choices) => call('POST', `/proposals/${encodeURIComponent(id)}/refresh`, { choices }),
     undoRefresh: (id) => call('POST', `/proposals/${encodeURIComponent(id)}/undo-refresh`, {}),
     saveBaseline: (name, version) => call('POST', '/baselines', { name, version }),
+    restoreVersion: (v) => call('POST', `/versions/${v}/restore`, {}),
     subscribe: (fn) => {
       if (typeof EventSource === 'undefined') return () => {};
       const es = new EventSource(`${baseUrl}/events?user=${encodeURIComponent(userId)}`);

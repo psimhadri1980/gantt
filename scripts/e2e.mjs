@@ -837,6 +837,20 @@ await test('a baseline is offered on approval and needs baseline.save (B1, K22)'
   expectEq(await page.evaluate(() => window.svc.snapshot('carol').version), 13, 'saving a baseline does not create a version');
 });
 
+await test('an earlier version is restored only through a new Proposal; the summary counts open Proposals (K22)', async (page) => {
+  await proposals(page);
+  await page.evaluate(() => { const p = window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { name: 'Arch review v2' } }]); window.svc.act('alice', p.id, 'submit'); window.svc.act('carol', p.id, 'approve'); });
+  await page.waitForFunction(() => window.svc.snapshot('alice').version === 13);
+  await page.locator('.gx-pbar select option[value="v:12"]').waitFor({ state: 'attached' });
+  await viewSelect(page).selectOption('v:12');
+  await page.locator('.gx-pbar [data-action="restore"]').click();
+  await page.locator('.gx-pbar select option:checked', { hasText: 'Restore version 12' }).waitFor({ state: 'attached' });
+  await page.locator('.gx-name-text', { hasText: /^Architecture review$/ }).waitFor();
+  expectEq(await page.evaluate(() => window.svc.snapshot('erin').current.tasks.find((t) => t.id === 't3').name), 'Arch review v2', 'Current is unchanged until approval');
+  await page.keyboard.press('Escape');
+  await page.locator('.gx-details dd', { hasText: /^1$/ }).first().waitFor(); // Open proposals: 1
+});
+
 await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', async (page) => {
   await proposals(page);
   await page.evaluate(() => window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.3 } }]));

@@ -150,3 +150,32 @@ describe('baselines (Phase 8, B1)', () => {
     expect(b.version).toBe(1);
   });
 });
+
+describe('restore an earlier version (K22)', () => {
+  it('opens a new Proposal that, once approved, brings back that version exactly', () => {
+    const { svc } = make();
+    // Version 2: rename a, delete c, add d with a link; version 3: move b.
+    const p = svc.change('alice', null, [upd('a', { name: 'A2', owner: 'zed' }), { entity: 'task', op: 'delete', id: 'c' },
+      { entity: 'task', op: 'create', id: 'd', fields: { name: 'D', type: 'task', parent: null, start: '2026-11-20', duration: 1 } },
+      { entity: 'link', op: 'create', id: 'l2', fields: { source: 'b', target: 'd', type: 'FS' } }]);
+    svc.act('alice', p.id, 'submit'); svc.act('carol', p.id, 'approve');
+    const q = svc.change('alice', null, [upd('b', { duration: 7 })]);
+    svc.act('alice', q.id, 'submit'); svc.act('carol', q.id, 'approve');
+    expect(svc.snapshot('alice').version).toBe(3);
+    const r = svc.restoreVersion('alice', 1);
+    expect(r.name).toBe('Restore version 1');
+    expect(svc.snapshot('alice').version).toBe(3); // nothing changed yet
+    svc.act('alice', r.id, 'submit'); svc.act('carol', r.id, 'approve');
+    const now = svc.snapshot('alice').current!;
+    const norm = (o: object) => Object.fromEntries(Object.entries(o).sort(([x], [y]) => x.localeCompare(y)));
+    const strip = (d: RoadmapDocument) => JSON.stringify({ t: [...d.tasks].sort((a, b) => a.id.localeCompare(b.id)).map(norm), l: [...d.links].sort((a, b) => a.id.localeCompare(b.id)).map(norm) });
+    expect(strip(now)).toBe(strip(current));
+    expect(now.roadmap.version).toBe(4);
+  });
+  it('needs view.history', () => {
+    const { svc } = make();
+    const noHist = new RoadmapService({ current, rulesFor: () => rule('x', ['view', 'proposal.create']), now: () => 0 });
+    expect(() => noHist.restoreVersion('x', 1)).toThrow(/view.history/);
+    void svc;
+  });
+});

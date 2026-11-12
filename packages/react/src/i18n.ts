@@ -131,6 +131,7 @@ export interface GanttMessages {
   chooseTarget: string;
   newProposal: string;
   versionReadOnly: string;
+  restoreVersion: string;
   closedReadOnly: (state: string) => string;
   returnedReason: (reason: string) => string;
   historyEntry: (who: string, action: string, date: string) => string;
@@ -406,6 +407,7 @@ export const defaultMessages: GanttMessages = {
   chooseTarget: 'Save this change in:',
   newProposal: 'A new Proposal',
   versionReadOnly: 'Earlier versions are read-only',
+  restoreVersion: 'Restore as a new Proposal',
   closedReadOnly: (state) => `The Proposal is ${state} and cannot be changed`,
   returnedReason: (r) => `Returned: ${r}`,
   historyEntry: (who, action, date) => `${date} · ${who} · ${action}`,

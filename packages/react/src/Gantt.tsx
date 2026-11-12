@@ -191,6 +191,8 @@ export interface CoreProps extends GanttProps {
   undoScope?: string;
   /** Tasks flagged for working together (K8): task id → what is wrong, shown on the row and the bar. */
   flags?: ReadonlyMap<string, string>;
+  /** Number of open Proposals, shown in the roadmap summary. */
+  openProposals?: number;
 }
 
 const SCHEDULE_FIELDS = new Set(['start', 'end', 'duration', 'durationUnit', 'constraint', 'mode', 'parent', 'type']);
@@ -1465,7 +1467,7 @@ function GanttView(props: CoreProps & {
         {detailsPanel && (!compact || selection.length > 0) && (() => {
           const panel = <DetailsPanel model={model} selection={selection} kinds={kinds} select={detailsSelect} visibleIds={rowIndexOf} barIds={bars} i18n={i18n}
             whyNotEdit={whyNotEdit} edit={editTask} compare={compare ? { base: props.compareWith!, placement: compare.base } : undefined} analysis={analysis}
-            whyNotLinkEdit={whyNotLinkEdit} editLink={editLink} editMany={editMany} />;
+            whyNotLinkEdit={whyNotLinkEdit} editLink={editLink} editMany={editMany} openProposals={props.openProposals} />;
           // On a small screen (F5) the panel is a sheet over the chart, closed by clearing the selection.
           return compact ? <div className="gx-sheet"><button className="gx-btn gx-small gx-sheet-close" aria-label={m.closePanel} onClick={() => select([])}>×</button>{panel}</div> : panel;
         })()}
