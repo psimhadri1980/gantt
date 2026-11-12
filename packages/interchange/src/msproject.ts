@@ -77,6 +77,26 @@ const hoursOf = (d: string, hpd: number) => {
   return m ? +(m[1] ?? 0) * hpd + +(m[2] ?? 0) + +(m[3] ?? 0) / 60 + +(m[4] ?? 0) / 3600 : NaN;
 };
 
+/** The text between the first `<name>` and the last `</name>`, or '' (indexOf, so its time is linear in the input). */
+function between(xml: string, name: string): string {
+  const a = xml.indexOf(`<${name}>`), b = xml.lastIndexOf(`</${name}>`);
+  return a < 0 || b < a ? '' : xml.slice(a + name.length + 2, b);
+}
+/**
+ * The contents of each `<name>…</name>` element in order (not nested). Scans with indexOf rather than a lazy
+ * regular expression, so a hostile file cannot make it take quadratic time.
+ */
+function elements(xml: string, name: string): string[] {
+  const open = `<${name}>`, close = `</${name}>`, out: string[] = [];
+  for (let i = xml.indexOf(open); i >= 0; ) {
+    const j = xml.indexOf(close, i + open.length);
+    if (j < 0) break;
+    out.push(xml.slice(i + open.length, j));
+    i = xml.indexOf(open, j + close.length);
+  }
+  return out;
+}
+
 /** The roadmap read from a Project file, with warnings, or the reasons it was refused. */
 export type MsImport = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[] };
 
@@ -88,7 +108,7 @@ export function fromMsProject(xml: string, base?: Partial<RoadmapDocument>): MsI
   if (!/<Project[\s>]/.test(xml)) return { ok: false, errors: [{ path: 'file', message: 'not a Microsoft Project XML file' }] };
   const hpd = +(tag(xml, 'MinutesPerDay') ?? 480) / 60 || 8;
   const warnings: Issue[] = [];
-  const blocks = [...(/<Tasks>([\s\S]*)<\/Tasks>/.exec(xml)?.[1] ?? '').matchAll(/<Task>([\s\S]*?)<\/Task>/g)].map((m) => m[1]!);
+  const blocks = elements(between(xml, 'Tasks'), 'Task');
   const rows = blocks.map((b) => ({ b, uid: tag(b, 'UID')!, level: +(tag(b, 'OutlineLevel') ?? 1) })).filter((r) => r.uid && r.uid !== '0' && r.level > 0 && tag(r.b, 'Name') !== undefined);
   const idOf = new Map(rows.map((r) => [r.uid, tag(r.b, 'Text1') || `t${r.uid}`]));
   const tasks: Task[] = [], links: Link[] = [];
@@ -119,11 +139,11 @@ export function fromMsProject(xml: string, base?: Partial<RoadmapDocument>): MsI
     if (tag(r.b, 'Active') === '0') t.mode = 'inactive';
     const owner = tag(r.b, 'Text2'); if (owner) t.owner = owner;
     tasks.push(t);
-    for (const pm of r.b.matchAll(/<PredecessorLink>([\s\S]*?)<\/PredecessorLink>/g)) {
-      const src = idOf.get(tag(pm[1]!, 'PredecessorUID') ?? '');
+    for (const pm of elements(r.b, 'PredecessorLink')) {
+      const src = idOf.get(tag(pm, 'PredecessorUID') ?? '');
       if (!src) { warnings.push({ path: `task ${t.name}`, message: 'a predecessor is not in the file and was left out' }); continue; }
-      const lagTenths = +(tag(pm[1]!, 'LinkLag') ?? 0), lf = tag(pm[1]!, 'LagFormat');
-      const l: Link = { id: `l-${src}-${id}`, source: src, target: id, type: LINK_FROM[+(tag(pm[1]!, 'Type') ?? 1)] ?? 'FS' };
+      const lagTenths = +(tag(pm, 'LinkLag') ?? 0), lf = tag(pm, 'LagFormat');
+      const l: Link = { id: `l-${src}-${id}`, source: src, target: id, type: LINK_FROM[+(tag(pm, 'Type') ?? 1)] ?? 'FS' };
       if (lagTenths) { if (lf === '5' || lf === '6') { l.lag = lagTenths / 600; l.lagUnit = 'hour'; } else l.lag = lagTenths / 600 / hpd; }
       links.push(l);
     }

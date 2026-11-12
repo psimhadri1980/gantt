@@ -70,7 +70,7 @@ export function docFromTable(table: string[][], base: Pick<RoadmapDocument, 'con
     const start = at(r, 'start'); if (start) t.start = start;
     const dur = at(r, 'duration'); if (dur) { const n = Number(dur.replace(',', '.')); if (Number.isFinite(n)) t.duration = n; else errors.push({ path: `${row}.duration`, message: `not a number: "${dur}"` }); }
     const unit = at(r, 'durationUnit'); if (unit) t.durationUnit = unit as Task['durationUnit'];
-    const pr = at(r, 'progress'); if (pr) { const n = Number(pr.replace('%', '').replace(',', '.')); if (Number.isFinite(n)) t.progress = Math.max(0, Math.min(1, n / 100)); else errors.push({ path: `${row}.progress`, message: `not a number: "${pr}"` }); }
+    const pr = at(r, 'progress'); if (pr) { const n = Number(pr.replaceAll('%', '').trim().replace(',', '.')); if (Number.isFinite(n)) t.progress = Math.max(0, Math.min(1, n / 100)); else errors.push({ path: `${row}.progress`, message: `not a number: "${pr}"` }); }
     const owner = at(r, 'owner'); if (owner) t.owner = owner;
     const ct = at(r, 'constraint'); if (ct) t.constraint = { type: ct as NonNullable<Task['constraint']>['type'], ...(at(r, 'constraintDate') ? { date: at(r, 'constraintDate') } : {}) };
     const dl = at(r, 'deadline'); if (dl) t.deadline = dl;
