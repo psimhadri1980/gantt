@@ -260,6 +260,14 @@ await test('critical path highlighting and the Schedule button (C2, K1)', async 
 // ---------- Phase 5: editing on the chart ----------
 const taskStart = (page, id) => page.evaluate((i) => window.gantt.current.getData().tasks.find((t) => t.id === i)?.start, id);
 async function barBox(page, id) { const b = await page.locator(`.gx-bar[data-task="${id}"]`).boundingBox(); if (!b) throw new Error(`bar ${id} not visible`); return b; }
+/** Fails with what is there instead, when the point is not on the task's bar (layouts differ between machines). */
+async function assertOnBar(page, id, x, y) {
+  const what = await page.evaluate(({ id, x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(`.gx-bar[data-task="${id}"]`) ? null : `${el?.tagName}.${el?.className} (viewport ${innerWidth}×${innerHeight})`;
+  }, { id, x, y });
+  if (what) throw new Error(`(${Math.round(x)}, ${Math.round(y)}) is not on bar ${id}: ${what}`);
+}
 /** Scrolls to a task and waits until its bar stops moving (scrolling and redraws settle), so pointer coordinates are right. */
 async function scrollSettled(page, id) {
   await page.evaluate((i) => window.gantt.current.scrollToTask(i), id);
@@ -280,6 +288,7 @@ await test('drag a task: successors preview before release, the change applies t
   const px = await pxPerDay(page);
   const b = await barBox(page, 't7');
   const s7 = await taskStart(page, 't7'), s8 = await taskStart(page, 't8');
+  await assertOnBar(page, 't7', b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.down();
   await page.mouse.move(b.x + b.width / 2 + px * 3.1, b.y + b.height / 2, { steps: 8 });
@@ -312,6 +321,7 @@ await test('Esc cancels a drag, resize changes the duration, progress can be dra
   await page.waitForTimeout(200);
   expectEq(await taskStart(page, 't7'), s7, 'Esc cancels');
   b = await barBox(page, 't7');
+  await assertOnBar(page, 't7', b.x + b.width - 2, b.y + b.height / 2);
   await page.mouse.move(b.x + b.width - 2, b.y + b.height / 2); await page.mouse.down();
   await page.mouse.move(b.x + b.width - 2 + px * 2, b.y + b.height / 2, { steps: 5 }); await page.mouse.up();
   await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').duration === 10, null, { timeout: 8000 })
