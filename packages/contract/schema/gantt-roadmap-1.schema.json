@@ -71,6 +71,8 @@
         "kind": { "type": "string", "description": "Host-defined kind; not checked against a list." },
         "lane": { "type": "boolean", "description": "Draw the children as bars on this row." },
         "hasChildren": { "type": "boolean", "description": "Children exist but are loaded on demand." },
+        "calendar": { "type": "string", "description": "Calendar id for this task (C8)." },
+        "splits": { "type": "array", "description": "Pauses in a split task (D12).", "items": { "type": "object", "required": ["after", "gap"], "properties": { "after": { "type": "integer", "minimum": 1 }, "gap": { "type": "integer", "minimum": 1 } }, "additionalProperties": false } },
         "order": { "type": "number", "description": "Position among its siblings, ascending. Tasks without it keep their place in the array." },
         "start": { "$ref": "#/$defs/date" },
         "duration": { "type": "number", "minimum": 0, "description": "Working time in durationUnit." },

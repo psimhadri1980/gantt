@@ -1,7 +1,16 @@
 import { fromDay, type DayNum } from '@gantt/engine';
 import { dateFormat } from './format.ts';
 
-export interface ZoomLevel { id: string; label: string; pxPerDay: number; major: 'year' | 'quarter' | 'month'; minor: 'month' | 'week' | 'day' }
+/** Units a scale line can count in (G2, G5). */
+export type ScaleUnit = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour';
+/**
+ * A zoom level (G1, G2): width of a day and the units of its two scale lines. `format` replaces the label
+ * of a unit (for example fiscal quarters or "Sprint 12"); it gets the tick's day number (fractional for hours).
+ */
+export interface ZoomLevel {
+  id: string; label: string; pxPerDay: number; major: ScaleUnit; minor: ScaleUnit;
+  format?: Partial<Record<ScaleUnit, (day: number, locale?: string) => string>>;
+}
 
 export const ZOOM_LEVELS: ZoomLevel[] = [
   { id: 'year', label: 'Years', pxPerDay: 1.2, major: 'year', minor: 'month' },
@@ -10,6 +19,8 @@ export const ZOOM_LEVELS: ZoomLevel[] = [
   { id: 'week', label: 'Weeks', pxPerDay: 22, major: 'month', minor: 'week' },
   { id: 'day', label: 'Days', pxPerDay: 44, major: 'month', minor: 'day' },
 ];
+/** An hour level for hour-based plans (G4); add it to `zoomLevels` when needed. */
+export const HOUR_ZOOM: ZoomLevel = { id: 'hour', label: 'Hours', pxPerDay: 24 * 32, major: 'day', minor: 'hour' };
 
 export interface Scale { origin: DayNum; pxPerDay: number }
 export const xOf = (s: Scale, d: DayNum) => (d - s.origin) * s.pxPerDay;
@@ -31,7 +42,7 @@ export function isoWeek(d: DayNum): number {
 }
 
 /** Ticks of one unit covering [from, to], labelled via Intl in the given locale. */
-export function ticks(s: Scale, unit: 'year' | 'quarter' | 'month' | 'week' | 'day', from: DayNum, to: DayNum, locale?: string): Tick[] {
+export function ticks(s: Scale, unit: ScaleUnit, from: DayNum, to: DayNum, locale?: string, format?: (day: number, locale?: string) => string): Tick[] {
   const out: Tick[] = [];
   const fmt = (o: Intl.DateTimeFormatOptions) => dateFormat(locale, o);
   const numDM = fmt({ day: 'numeric', month: 'numeric' }), mon = fmt({ month: 'short' }), monY = fmt({ month: 'short', year: 'numeric' }), dayF = fmt({ day: 'numeric' }), wd = fmt({ weekday: 'narrow' });
@@ -52,9 +63,14 @@ export function ticks(s: Scale, unit: 'year' | 'quarter' | 'month' | 'week' | 'd
         if (w >= 50) return `W${isoWeek(d)} ${numDM.format(date)}`;
         return w >= 28 ? `W${isoWeek(d)}` : '';
       }; break;
-    default: cur = from; next = (d) => d + 1;
-      label = (d) => `${wd.format(new Date(d * 86_400_000))} ${dayF.format(new Date(d * 86_400_000))}`;
+    case 'hour': cur = Math.floor(from); next = (d) => Math.round((d + 1 / 24) * 24) / 24;
+      label = (d) => String(Math.round((d - Math.floor(d)) * 24)).padStart(2, '0'); break;
+    default: cur = Math.floor(from); next = (d) => d + 1;
+      label = (d) => s.pxPerDay >= 200
+        ? fmt({ weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(d * 86_400_000))
+        : `${wd.format(new Date(d * 86_400_000))} ${dayF.format(new Date(d * 86_400_000))}`;
   }
+  if (format) label = (d) => format(d, locale);
   while (cur <= to) {
     const n = next(cur);
     out.push({ day: cur, x: xOf(s, cur), w: (n - cur) * s.pxPerDay, label: label(cur) });

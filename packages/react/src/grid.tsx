@@ -39,7 +39,7 @@ export function builtinColumns(m: GanttMessages): GridColumn[] {
     { id: 'name', label: m.colName, width: 150, minWidth: 100, field: 'name' },
     { id: 'start', label: m.colStart, width: 90, minWidth: 70, field: 'start', text: ({ placed, i18n }) => placed.scheduled ? fmtDate(placed.start!, i18n.locale) : <em className="gx-muted">{i18n.t.unscheduled}</em> },
     { id: 'end', label: m.colEnd, width: 90, minWidth: 70, field: 'end', hidden: true, text: ({ placed, i18n }) => placed.scheduled ? fmtDate(placed.end!, i18n.locale) : '' },
-    { id: 'duration', label: m.colDays, width: 48, minWidth: 40, field: 'duration', align: 'end', text: ({ placed, i18n }) => placed.scheduled ? i18n.num(placed.duration ?? 0) : '' },
+    { id: 'duration', label: m.colDays, width: 48, minWidth: 40, field: 'duration', align: 'end', text: ({ placed, task, i18n }) => !placed.scheduled ? '' : task.durationUnit === 'hour' ? `${i18n.num(task.duration ?? 0)} h` : i18n.num(placed.duration ?? 0) },
     { id: 'progress', label: m.colProgress, width: 56, minWidth: 44, field: 'progress', align: 'end', hidden: true, text: ({ placed, task, i18n }) => task.type === 'milestone' || !placed.scheduled ? '' : i18n.pct(placed.progress) },
     { id: 'owner', label: m.colOwner, width: 80, minWidth: 50, field: 'owner', hidden: true, text: ({ task }) => task.owner ?? '' },
     { id: 'kind', label: m.colKind, width: 80, minWidth: 50, field: 'kind', hidden: true, text: ({ task }) => task.kind ?? '' },

@@ -82,3 +82,36 @@ export function buildCalendars(cals: Calendar[] | undefined): Map<string, WorkCa
   for (const c of cals ?? []) m.set(c.id, new WorkCalendar(c));
   return m;
 }
+
+/**
+ * Where a task's work falls (C8, D12, G4): its pieces in working time on its own calendar, and how much of
+ * the last day it uses (an 8-hour day calendar and a 4-hour task: 0.5). `work` is in working days and may
+ * be fractional for hour-based tasks.
+ */
+export interface TaskSpan { start: DayNum; end: DayNum; segments: [DayNum, DayNum][]; endFraction: number; occupied: number }
+export function spanOf(cal: WorkCalendar, start: DayNum, work: number, splits?: { after: number; gap: number }[]): TaskSpan {
+  const s0 = cal.nextWorking(start);
+  if (work <= 0) return { start: s0, end: s0, segments: [[s0, s0]], endFraction: 1, occupied: 0 };
+  const days = Math.max(1, Math.ceil(work - 1e-9));
+  const endFraction = Math.min(1, work - (days - 1));
+  const segments: [DayNum, DayNum][] = [];
+  let s = s0, left = days, occupied = 0;
+  for (const sp of splits ?? []) {
+    if (sp.after >= left) break;
+    const e = cal.endOf(s, sp.after);
+    segments.push([s, e]);
+    left -= sp.after; occupied += sp.after + sp.gap;
+    s = cal.shift(e, sp.gap + 1);
+  }
+  const e = cal.endOf(s, left);
+  segments.push([s, e]);
+  occupied += left;
+  return { start: s0, end: e, segments, endFraction, occupied };
+}
+
+/** A task's work in working days: hours are divided by the calendar's hours per day (G4). */
+export function workDays(t: { type: string; duration?: number; durationUnit?: string }, hoursPerDay: number): number {
+  if (t.type === 'milestone') return 0;
+  if (t.durationUnit === 'hour') return Math.max(1 / hoursPerDay, (t.duration ?? hoursPerDay) / hoursPerDay);
+  return Math.max(1, t.duration ?? 1);
+}

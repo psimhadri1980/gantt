@@ -259,6 +259,12 @@ export interface GanttMessages {
   kindRemoved: string;
   kindChanged: string;
   undecidedLeft: (n: string) => string;
+  // scheduling depth (Phase 7)
+  slackShow: string;
+  problems: (n: string) => string;
+  problemsTitle: string;
+  noProblems: string;
+  lateBy: (n: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -505,6 +511,11 @@ export const defaultMessages: GanttMessages = {
   kindRemoved: 'deleted',
   kindChanged: 'changed',
   undecidedLeft: (n) => `${n} still to decide`,
+  slackShow: 'Slack',
+  problems: (n) => `Problems (${n})`,
+  problemsTitle: 'Scheduling problems',
+  noProblems: 'No scheduling problems.',
+  lateBy: (n) => `${n} working days`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 

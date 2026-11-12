@@ -54,6 +54,10 @@ export interface Task {
   resources?: ResourceAssignment[];
   constraint?: { type: ConstraintType; date?: IsoDate };
   deadline?: IsoDate;
+  /** Calendar for this task's working time, instead of the roadmap's (C8). */
+  calendar?: string;
+  /** Split task (D12): after `after` working days of work, a pause of `gap` working days; in order. */
+  splits?: { after: number; gap: number }[];
   [extra: string]: unknown;
 }
 

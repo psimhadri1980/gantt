@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Gantt, memoryBackend, type GridColumn, type AccessRules, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
+import { Gantt, HOUR_ZOOM, memoryBackend, ZOOM_LEVELS, type GridColumn, type AccessRules, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
 import { RoadmapService } from '@gantt/service';
 import roles from '../../../packages/mock/src/samples/roles.json';
 import { generate, loadMock, splitForLazyLoading } from '@gantt/mock';
@@ -41,7 +41,27 @@ const BarTemplate = ({ task, placed }: { task: { name: string }; placed: { progr
 const TooltipTemplate = ({ task, Default }: { task: { owner?: string }; Default: ReactNode }) =>
   <>{Default}<div className="demo-tip-tpl">Owner: {task.owner ?? 'nobody'}</div></>;
 
-type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid';
+type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid' | 'depth';
+
+// Scheduling depth (Phase 7): a task calendar, a split task, hour-based tasks, constraints and a deadline that
+// are broken (so the Problems list has something to fix), and an inactive task.
+const depth = {
+  ...small,
+  calendars: [...(small.calendars ?? []), { id: 'six', name: 'Mon–Sat', workingDays: [1, 2, 3, 4, 5, 6], hoursPerDay: 8 }],
+  tasks: [
+    ...small.tasks.map((t) => t.id === 't8' ? { ...t, splits: [{ after: 4, gap: 3 }] }
+      : t.id === 't9' ? { ...t, deadline: '2026-12-01' }
+      : t.id === 't16' ? { ...t, constraint: { type: 'SNLT', date: '2026-12-01' } }
+      : t.id === 't17' ? { ...t, calendar: 'six' } : t),
+    { id: 'h1', name: 'Cut-over rehearsal', type: 'task', parent: 't15', start: '2026-12-21', duration: 4, durationUnit: 'hour' },
+    { id: 'h2', name: 'Cut-over', type: 'task', parent: 't15', start: '2026-12-22', duration: 12, durationUnit: 'hour', mode: 'manual' },
+    { id: 'x1', name: 'Parked idea', type: 'task', parent: null, start: '2026-11-10', duration: 5, mode: 'inactive' },
+  ],
+  links: [...small.links, { id: 'lh', source: 'h1', target: 'h2', type: 'FS' }, { id: 'lh2', source: 't17', target: 'h2', type: 'FS' }],
+};
+// Fiscal quarters (G2): the year starts in April.
+const fiscal = { ...ZOOM_LEVELS[1]!, id: 'fiscal', label: 'Fiscal', format: { quarter: (d: number) => { const dt = new Date(d * 86_400_000); const m = dt.getUTCMonth(); const fy = m >= 3 ? dt.getUTCFullYear() + 1 : dt.getUTCFullYear(); return `FY${String(fy).slice(2)} Q${Math.floor(((m + 9) % 12) / 3) + 1}`; } } };
+const depthLevels = [...ZOOM_LEVELS, HOUR_ZOOM, fiscal];
 const rules = roles as Record<string, AccessRules>;
 const DAY = 86_400_000;
 const USERS: [string, string][] = [['alice', 'Alice (planner)'], ['bob', 'Bob (reviewer)'], ['carol', 'Carol (approver)'], ['dave', 'Dave (progress only)'],
@@ -80,6 +100,7 @@ function App() {
   const result = useMemo(() => {
     const t0 = performance.now();
     const input = sample === 'small' ? small
+      : sample === 'depth' ? depth
       : sample === 'invalid' ? { ...small, tasks: [...small.tasks.slice(0, 11), { ...small.tasks[11], start: 'soon' }, ...small.tasks.slice(12)] }
       : generate({ tasks: 10000, linkDensity: 0.55, laneEvery: sample === 'lanes' ? 2 : 0 });
     if (sample === 'lazy') {
@@ -101,6 +122,7 @@ function App() {
           <option value="large">Large (10,000 tasks)</option>
           <option value="lanes">Large as lanes</option>
           <option value="lazy">Children loaded on expand</option>
+          <option value="depth">Scheduling depth (hours, splits, problems)</option>
           <option value="invalid">Invalid file</option>
         </select></label>
         <label>Theme <select value={theme ?? ''} onChange={(e) => setTheme((e.target.value || undefined) as typeof theme)}>
@@ -145,6 +167,8 @@ function App() {
           <Gantt ref={ref} data={result.r.doc} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 110px)"
             markers={[{ date: '2026-12-18', label: 'Code freeze' }]} userId="demo-user"
             readOnly={readOnly} saveState={save} onDataChanged={onDataChanged} loadChildren={result.loadChildren}
+            zoomLevels={sample === 'depth' ? depthLevels : undefined}
+            scaleRange={sample === 'depth' ? { start: '2026-10-26' } : undefined}
             columns={withTemplates ? hostColumns : undefined} barTemplate={withTemplates ? BarTemplate : undefined} tooltipTemplate={withTemplates ? TooltipTemplate : undefined}
             locale={lang === 'de' ? 'de-DE' : undefined} messages={lang === 'de' ? german : undefined}
             onBeforeOperation={(op) => (lockZoom && op.type === 'zoom.set' ? 'Zoom is locked by the host' : undefined)}

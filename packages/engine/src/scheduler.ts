@@ -1,5 +1,5 @@
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
-import { buildCalendars, fromDay, toDay, WorkCalendar, type DayNum } from './calendar.ts';
+import { buildCalendars, fromDay, spanOf, toDay, workDays, WorkCalendar, type DayNum } from './calendar.ts';
 
 /**
  * The scheduling engine (C1, C2, C9, C10, C11): forward and backward pass over the four dependency types
@@ -37,6 +37,10 @@ export interface ScheduleIssue {
   message: string;
   /** Working days by which it is broken. */
   by?: number;
+  /** The date that would satisfy it (a start for dependencies; the actual date for constraints and deadlines). */
+  suggest?: string;
+  /** Links in a cycle. */
+  linkIds?: string[];
 }
 
 export interface ScheduleResult {
@@ -102,12 +106,19 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
     const left = new Set([...byId.keys()].filter((id) => indeg.get(id)! > 0));
     const cycle = findCycle(left, out, aggOut);
     const names = cycle.map((id) => byId.get(id)?.name ?? id);
-    return { tasks: new Map(), changes: [], cycle, issues: [{ kind: 'cycle', message: `Dependencies form a cycle: ${names.join(' → ')}` }] };
+    const linkIds: string[] = [];
+    for (let i = 0; i + 1 < cycle.length; i++) { const l = doc.links.find((x) => x.source === cycle[i] && x.target === cycle[i + 1]); if (l) linkIds.push(l.id); }
+    return { tasks: new Map(), changes: [], cycle, issues: [{ kind: 'cycle', message: `Dependencies form a cycle: ${names.join(' → ')}`, linkIds }] };
   }
 
   // Forward pass.
   const es = new Map<string, DayNum>(), ef = new Map<string, DayNum>(), driver = new Map<string, string>();
-  const durOf = (t: Task) => (t.type === 'milestone' ? 0 : Math.max(1, Math.round(t.durationUnit === 'hour' ? (t.duration ?? hoursPerDay) / hoursPerDay : t.duration ?? 1)));
+  // Each task in its own calendar (C8), with its pauses (D12) and hours (G4).
+  const hpdOf = new Map((doc.calendars ?? []).map((c) => [c.id, c.hoursPerDay ?? 8]));
+  const calOf = (t: Task) => (t.calendar && cals.get(t.calendar)) || cal;
+  const spanFor = (t: Task, s: DayNum) => spanOf(calOf(t), s, workDays(t, (t.calendar && hpdOf.get(t.calendar)) || hoursPerDay), t.splits);
+  /** Working days the task occupies from start to end, pauses included. */
+  const durOf = (t: Task) => (t.type === 'milestone' ? 0 : Math.max(1, Math.round(spanFor(t, roadmapStart).occupied)));
   const minStartFrom = (e: Edge, succ: Task): DayNum | undefined => {
     const ps = es.get(e.from), pf = ef.get(e.from);
     if (ps === undefined || pf === undefined) return undefined;
@@ -152,9 +163,9 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
       }
     }
     if (start === undefined) continue; // unscheduled
-    start = cal.nextWorking(start);
+    start = calOf(t).nextWorking(start);
     es.set(id, start);
-    ef.set(id, d === 0 ? start : cal.endOf(start, d));
+    ef.set(id, d === 0 ? start : spanFor(t, start).end);
   }
 
   // Backward pass for slack and the critical path (C2).
@@ -204,10 +215,10 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
     const c = t.constraint;
     if (c?.date && !isSummary(id)) {
       const cd = toDay(c.date);
-      if (c.type === 'SNLT' && s > cd) issues.push({ kind: 'constraint', taskId: id, message: `${t.name} starts after ${c.date} (start no later than)`, by: cal.workingDaysBetween(cd, s) - 1 });
-      if (c.type === 'FNLT' && f > cd) issues.push({ kind: 'constraint', taskId: id, message: `${t.name} finishes after ${c.date} (finish no later than)`, by: cal.workingDaysBetween(cd, f) - 1 });
+      if (c.type === 'SNLT' && s > cd) issues.push({ kind: 'constraint', taskId: id, message: `${t.name} starts after ${c.date} (start no later than)`, by: cal.workingDaysBetween(cd, s) - 1, suggest: fromDay(s) });
+      if (c.type === 'FNLT' && f > cd) issues.push({ kind: 'constraint', taskId: id, message: `${t.name} finishes after ${c.date} (finish no later than)`, by: cal.workingDaysBetween(cd, f) - 1, suggest: fromDay(f) });
     }
-    if (t.deadline && f > toDay(t.deadline)) issues.push({ kind: 'deadline', taskId: id, message: `${t.name} finishes after its deadline ${t.deadline}`, by: cal.workingDaysBetween(toDay(t.deadline), f) - 1 });
+    if (t.deadline && f > toDay(t.deadline)) issues.push({ kind: 'deadline', taskId: id, message: `${t.name} finishes after its deadline ${t.deadline}`, by: cal.workingDaysBetween(toDay(t.deadline), f) - 1, suggest: fromDay(f) });
   }
   // Dependencies a manual task (or a fixed constraint) breaks.
   for (const e of edges) {
@@ -216,7 +227,7 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
     const m = minStartFrom(e, succ);
     if (s !== undefined && m !== undefined && s < m) {
       const pn = byId.get(e.from)?.name, sn = succ.name;
-      issues.push({ kind: 'brokenDependency', linkId: e.linkId, taskId: e.to, message: `${sn} is scheduled before ${pn} allows`, by: cal.workingDaysBetween(s, m) - 1 });
+      issues.push({ kind: 'brokenDependency', linkId: e.linkId, taskId: e.to, message: `${sn} is scheduled before ${pn} allows`, by: cal.workingDaysBetween(s, m) - 1, suggest: fromDay(calOf(succ).nextWorking(m)) });
     }
   }
   return { tasks, changes, issues, end: end === -Infinity ? undefined : end };
@@ -254,4 +265,42 @@ export function applySchedule(doc: RoadmapDocument, r: ScheduleResult): RoadmapD
   if (!r.changes.length) return doc;
   const ch = new Map(r.changes.map((c) => [c.id, c.start]));
   return { ...doc, tasks: doc.tasks.map((t) => { const s = ch.get(t.id); if (s === undefined) return t; const { end: _e, ...rest } = t; return { ...rest, start: s }; }) };
+}
+
+/** One way to resolve a scheduling problem (C5), as data operations the caller runs (and can undo). */
+export interface IssueFix {
+  label: string;
+  ops: ({ type: 'task.update'; id: string; fields: Record<string, unknown> } | { type: 'link.delete'; id: string })[];
+}
+
+/** Explained fixes for an issue (C5): move, remove the cause, or switch to automatic scheduling. */
+export function fixesFor(doc: RoadmapDocument, issue: ScheduleIssue): IssueFix[] {
+  const task = issue.taskId ? doc.tasks.find((t) => t.id === issue.taskId) : undefined;
+  const link = issue.linkId ? doc.links.find((l) => l.id === issue.linkId) : undefined;
+  const name = (id: string) => doc.tasks.find((t) => t.id === id)?.name ?? id;
+  const out: IssueFix[] = [];
+  const dropEnd = task?.end ? { end: null } : {};
+  switch (issue.kind) {
+    case 'brokenDependency': {
+      if (task && issue.suggest) {
+        const fixedConstraint = task.constraint && (task.constraint.type === 'MSO' || task.constraint.type === 'MFO');
+        out.push({ label: `Move ${task.name} to start on ${issue.suggest}`, ops: [{ type: 'task.update', id: task.id, fields: { start: issue.suggest, ...dropEnd, ...(fixedConstraint ? { constraint: null } : {}) } }] });
+      }
+      if (task?.mode === 'manual') out.push({ label: `Schedule ${task.name} automatically`, ops: [{ type: 'task.update', id: task.id, fields: { mode: 'auto' } }] });
+      if (link) out.push({ label: `Remove the dependency ${name(link.source)} → ${name(link.target)}`, ops: [{ type: 'link.delete', id: link.id }] });
+      break;
+    }
+    case 'constraint':
+      if (task && issue.suggest && task.constraint) out.push({ label: `Move the constraint to ${issue.suggest}`, ops: [{ type: 'task.update', id: task.id, fields: { constraint: { ...task.constraint, date: issue.suggest } } }] });
+      if (task) out.push({ label: `Remove the constraint on ${task.name}`, ops: [{ type: 'task.update', id: task.id, fields: { constraint: null } }] });
+      break;
+    case 'deadline':
+      if (task && issue.suggest) out.push({ label: `Move the deadline to ${issue.suggest}`, ops: [{ type: 'task.update', id: task.id, fields: { deadline: issue.suggest } }] });
+      if (task) out.push({ label: `Remove the deadline of ${task.name}`, ops: [{ type: 'task.update', id: task.id, fields: { deadline: null } }] });
+      break;
+    case 'cycle':
+      for (const id of issue.linkIds ?? []) { const l = doc.links.find((x) => x.id === id); if (l) out.push({ label: `Remove the dependency ${name(l.source)} → ${name(l.target)}`, ops: [{ type: 'link.delete', id }] }); }
+      break;
+  }
+  return out;
 }

@@ -19,7 +19,7 @@ const KNOWN: Record<string, string[]> = {
   roadmap: ['id', 'name', 'version', 'timeZone', 'start', 'defaultCalendar', 'statusDate'],
   calendar: ['id', 'name', 'workingDays', 'hoursPerDay', 'holidays'],
   task: ['id', 'name', 'type', 'parent', 'kind', 'lane', 'order', 'start', 'duration', 'durationUnit', 'end', 'progress',
-    'mode', 'owner', 'resources', 'constraint', 'deadline', 'hasChildren'],
+    'mode', 'owner', 'resources', 'constraint', 'deadline', 'hasChildren', 'calendar', 'splits'],
   link: ['id', 'source', 'target', 'type', 'kind', 'lag', 'lagUnit'],
   resource: ['id', 'name', 'capacityFte', 'calendar'],
 };
@@ -95,6 +95,7 @@ export function validate(input: unknown): ValidationResult {
   }
 
   const calendars = list(input, 'calendars', false);
+  const calendarIds = new Set(calendars.flatMap((c) => (isObj(c) && typeof c.id === 'string' ? [c.id] : [])));
   calendars.forEach((cal, i) => {
     const p = `calendars[${i}]`;
     if (!isObj(cal)) return err(p, 'must be an object');
@@ -132,6 +133,13 @@ export function validate(input: unknown): ValidationResult {
     oneOf(t, 'type', p, ['task', 'summary', 'milestone'], true);
     oneOf(t, 'mode', p, ['auto', 'manual', 'inactive']);
     oneOf(t, 'durationUnit', p, ['day', 'hour']);
+    if (t.calendar !== undefined && (typeof t.calendar !== 'string' || !calendarIds.has(t.calendar))) err(`${p}.calendar`, 'must name a calendar in calendars');
+    if (t.splits !== undefined) {
+      if (!Array.isArray(t.splits)) err(`${p}.splits`, 'must be an array');
+      else t.splits.forEach((x, j) => {
+        if (!isObj(x) || !Number.isInteger(x.after) || (x.after as number) < 1 || !Number.isInteger(x.gap) || (x.gap as number) < 1) err(`${p}.splits[${j}]`, 'needs whole numbers after ≥ 1 and gap ≥ 1 (working days)');
+      });
+    }
     if (t.parent === undefined) err(`${p}.parent`, 'is required (use null for a top-level task)');
     else if (t.parent !== null) {
       if (typeof t.parent !== 'string') err(`${p}.parent`, 'must be a string or null');

@@ -532,6 +532,58 @@ await test('host templates for a cell, a bar and a tooltip (G7)', async (page) =
   await page.locator('.gx-tooltip .demo-tip-tpl').waitFor();
 });
 
+// ---------- Phase 7: scheduling depth and time scale ----------
+async function depthSample(page) { await page.goto('http://127.0.0.1:5192/?sample=depth'); await page.waitForSelector('.gx-bar[data-task="t8"]'); }
+
+await test('a scheduling problem explains itself; its fix applies as one change and can be undone (C4, C5)', async (page) => {
+  await depthSample(page);
+  await page.getByRole('button', { name: 'Problems (2)' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Scheduling problems' });
+  await dlg.getByText('Auth integration finishes after its deadline 2026-12-01').waitFor();
+  await dlg.getByRole('button', { name: 'Remove the deadline of Auth integration' }).click();
+  await page.getByRole('button', { name: 'Problems (1)' }).waitFor();
+  expectEq(await page.evaluate(() => window.gantt.current.getData().tasks.find((t) => t.id === 't9').deadline), undefined, 'deadline removed');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: 'Problems (2)' }).waitFor();
+});
+
+await test('an hour-based task displays correctly at every zoom level (G4, G5)', async (page) => {
+  await depthSample(page);
+  for (const z of ['Years', 'Quarters', 'Months', 'Weeks', 'Days', 'Hours']) {
+    await page.getByRole('radio', { name: z, exact: true }).click();
+    await page.waitForFunction((n) => document.querySelector(`[role="radio"][aria-checked="true"]`)?.textContent === n, z);
+    await page.waitForTimeout(150);
+    const r = await page.evaluate(() => {
+      const w = (id) => document.querySelector(`.gx-bar[data-task="${id}"]`).getBoundingClientRect().width;
+      const day = document.querySelector('.gx-bar[data-task="t7"]').getBoundingClientRect().width / 10; // Data model: 8 working days over 10 calendar days
+      return { h1: w('h1'), h2: w('h2'), day };
+    });
+    // 4 hours = half an 8-hour day; 12 hours = a day and a half (never under 2 px).
+    if (Math.abs(r.h1 - Math.max(2, r.day * 0.5)) > 1 || Math.abs(r.h2 - Math.max(2, r.day * 1.5)) > 1) throw new Error(`${z}: ${JSON.stringify(r)}`);
+  }
+  await page.locator('.gx-tick.gx-minor span', { hasText: /^\d\d$/ }).first().waitFor(); // hour labels
+  expectEq((await row(page, 'Cut-over rehearsal').locator('.gx-col-duration').textContent()).trim(), '4 h', 'duration shown in hours');
+});
+
+await test('split tasks draw their pieces; slack is drawn as a bar extension (D12, B4)', async (page) => {
+  await depthSample(page);
+  expectEq(await page.locator('.gx-bar[data-task="t8"] .gx-piece').count(), 2, 'two pieces');
+  if (await page.locator('.gx-slack').count()) throw new Error('slack shown before asked');
+  await page.getByRole('button', { name: 'Slack', exact: true }).click();
+  await page.locator('.gx-slack').first().waitFor();
+});
+
+await test('custom scale labels and a fixed start boundary (G2, G3)', async (page) => {
+  await depthSample(page);
+  await page.getByRole('radio', { name: 'Fiscal' }).click();
+  await page.locator('.gx-tick.gx-major span', { hasText: /^FY27 Q3$/ }).first().waitFor();
+  await page.getByRole('radio', { name: 'Weeks', exact: true }).click();
+  await page.evaluate(() => { document.querySelector('.gx-chart').scrollLeft = 0; });
+  await page.waitForTimeout(200);
+  const first = await page.evaluate(() => [...document.querySelectorAll('.gx-tick.gx-minor')].find((t) => parseFloat(t.style.left) <= 0 && parseFloat(t.style.left) + parseFloat(t.style.width) > 0)?.textContent);
+  expectEq(first, 'W44 · 26 Oct', 'the scale starts at the fixed boundary');
+});
+
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------
 async function proposals(page) {
   await page.goto('http://127.0.0.1:5192/?sample=proposals');

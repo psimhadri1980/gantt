@@ -302,3 +302,11 @@
 .gx-choice { border: 0; padding: 0; margin: 6px 0 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .gx-choice legend { font-size: 11px; color: var(--gx-muted); padding: 0; margin-right: 6px; float: left; }
 .gx-warn-text { color: var(--gx-critical); }
+
+/* ---------- Scheduling depth (Phase 7) ---------- */
+.gx-slack { position: absolute; height: 4px; border-radius: 2px; background: repeating-linear-gradient(90deg, var(--gx-muted) 0 4px, transparent 4px 7px); opacity: 0.7; pointer-events: none; z-index: 1; }
+.gx-bar.gx-split { background: transparent !important; box-shadow: none; }
+.gx-bar.gx-split::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px dotted var(--gx-task); }
+.gx-piece { position: absolute; top: 0; bottom: 0; border-radius: var(--gx-radius); background: var(--gx-task); }
+.gx-problem { padding: 6px 0; border-bottom: 1px solid var(--gx-grid); }
+.gx-problems { max-width: 520px; }

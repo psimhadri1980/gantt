@@ -1,13 +1,13 @@
 import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel,
+  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel, type ScaleUnit,
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
   copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
   type GanttViewState, type SavedView, type TreeClipboard,
 } from '@gantt/state';
-import { fromDay, place, schedule, whyNotLink, type DayNum, type Placement } from '@gantt/engine';
+import { fixesFor, fromDay, place, schedule, whyNotLink, type DayNum, type IssueFix, type Placement, type ScheduleIssue } from '@gantt/engine';
 import { checkChange, type AccessEvaluator } from '@gantt/access';
 import { placeOffThread, scheduleOffThread } from './engineClient.ts';
 import { DragController, type DragKind } from './drag.ts';
@@ -94,6 +94,8 @@ export interface GanttProps {
   tooltipTemplate?: ComponentType<{ task: Task; placed: PlacedTask; Default: ReactNode }>;
   /** Compact mode for small screens (F5): `'auto'` (default) switches it on below 720 px. */
   compact?: boolean | 'auto';
+  /** Scale boundaries (G3): fixed dates; each side left out follows the data with some margin (flexible). */
+  scaleRange?: { start?: string; end?: string };
 }
 export type { GridColumn, CellProps, GanttViewState, SavedView };
 
@@ -157,6 +159,8 @@ export interface Ctx {
   matches: ReadonlySet<string> | null;
   barTemplate?: GanttProps['barTemplate']; tooltipTemplate?: GanttProps['tooltipTemplate'];
   flags?: ReadonlyMap<string, string>;
+  /** Latest finish of tasks with slack, while slack is shown (B4). */
+  slack: ReadonlyMap<string, number> | null;
   model: Model; kinds?: GanttKinds; locale?: string; laneOpen: ReadonlySet<string>; selKeys: ReadonlySet<string>; linkMarked: ReadonlySet<string>;
   loadState: ReadonlyMap<string, string>; compare: Compare | null; editing: string | null;
   /** Tasks on the critical path while highlighting is on (C2). */
@@ -466,8 +470,9 @@ function GanttView(props: CoreProps & {
   const zoom = props.zoom ?? zoomState;
   const level = levels.find((z) => z.id === zoom) ?? levels[Math.floor(levels.length / 2)]!;
   const span = model.placement.span;
-  const origin = (span?.start ?? 0) - 21;
-  const endDay = (span?.end ?? origin + 90) + 45;
+  // Flexible boundaries follow the data with a margin; fixed ones are the host's dates (G3).
+  const origin = props.scaleRange?.start ? dayOfIso(props.scaleRange.start) : (span?.start ?? 0) - 21;
+  const endDay = props.scaleRange?.end ? dayOfIso(props.scaleRange.end) + 1 : (span?.end ?? origin + 90) + 45;
   const scale: Scale = useMemo(() => ({ origin, pxPerDay: level.pxPerDay }), [origin, level.pxPerDay]);
   const chartWidth = (endDay - origin) * level.pxPerDay;
 
@@ -734,6 +739,10 @@ function GanttView(props: CoreProps & {
     return () => { live = false; };
   }, [data]);
   const [showCritical, setShowCritical] = useState(false);
+  // Slack drawn as a bar extension up to the latest finish (B4), and the problem list with fixes (C5).
+  const [showSlack, setShowSlack] = useState(false);
+  const slackEnds = useMemo(() => (showSlack && analysis ? new Map([...analysis.tasks].filter(([, t]) => t.slack > 0).map(([id, t]) => [id, t.lateFinish])) : null), [showSlack, analysis]);
+  const [problemsAt, setProblemsAt] = useState<{ x: number; y: number } | null>(null);
   const critical = useMemo(() => (showCritical && analysis ? new Set([...analysis.tasks].filter(([, t]) => t.critical).map(([id]) => id)) : null), [showCritical, analysis]);
   const criticalLinks = useMemo(() => {
     if (!critical || !analysis) return null;
@@ -752,8 +761,8 @@ function GanttView(props: CoreProps & {
   }, [data, props.evaluator, run, i18n]);
   apiRef.current = api;
   menuRef.current = (x, y, t) => openMenuRef.current(x, y, t);
-  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate, flags: props.flags }),
-    [model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate, props.flags]);
+  const ctx = useMemo<Ctx>(() => ({ model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, matches: shown.matches, barTemplate: props.barTemplate, tooltipTemplate: props.tooltipTemplate, flags: props.flags, slack: slackEnds }),
+    [slackEnds, model, kinds, locale, laneOpen, selKeys, linkMarked, loadState, compare, editing, critical, cols, frozen, shown.matches, props.barTemplate, props.tooltipTemplate, props.flags]);
   // What the user may change, with the reason when not (F14, L4).
   const whyNotEdit = useCallback((taskId: string, field: string): string | null => {
     const ro = props.readOnly;
@@ -1180,6 +1189,14 @@ function GanttView(props: CoreProps & {
     if (i !== undefined) ensureVisible(i);
   }, [select, linkById, rowIndexOf, ensureVisible]);
 
+  /** Why a fix may not be applied: read-only, or a field the user may not change (C5, F14). */
+  const whyNotFix = (f: IssueFix): string | null => {
+    for (const op of f.ops) {
+      if (op.type === 'link.delete') { const w = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? 'Missing permission: link.delete' : null; if (w) return w; }
+      else for (const f2 of Object.keys(op.fields)) { const w = whyNotEdit(op.id, f2); if (w) return w; }
+    }
+    return null;
+  };
   // ---------- View tools (D9–D11, D18, D19, F12) ----------
   const [findOpen, setFindOpen] = useState(false);
   const [found, setFound] = useState<{ ids: string[]; i: number }>({ ids: [], i: -1 });
@@ -1295,6 +1312,9 @@ function GanttView(props: CoreProps & {
         <div className="gx-toolbar-row">
           <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit}
             critical={showCritical} setCritical={setShowCritical} runSchedule={runSchedule} scheduleWhyNot={scheduleWhyNot} />
+          <button className="gx-btn" aria-pressed={showSlack} onClick={() => setShowSlack((v) => !v)}>{m.slackShow}</button>
+          <button className={`gx-btn${analysis?.issues.length ? ' gx-warn-btn' : ''}`} aria-haspopup="dialog" aria-expanded={!!problemsAt}
+            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setProblemsAt(problemsAt ? null : { x: r.left, y: r.bottom + 4 }); }}>{m.problems(i18n.num(analysis?.issues.length ?? 0))}</button>
           <button className="gx-btn" aria-disabled={!props.history.canUndo || undefined} title={props.history.canUndo ? `${m.undo} (Ctrl+Z)` : m.nothingToUndo} onClick={() => void props.history.undo()}>{m.undo}</button>
           <button className="gx-btn" aria-disabled={!props.history.canRedo || undefined} title={props.history.canRedo ? `${m.redo} (Ctrl+Y)` : m.nothingToRedo} onClick={() => void props.history.redo()}>{m.redo}</button>
           {(scheduleNote || notice) && <span className="gx-muted gx-notice" role="status">{notice || scheduleNote}</span>}
@@ -1362,7 +1382,7 @@ function GanttView(props: CoreProps & {
           <div className="gx-chart-wrap">
             <div className="gx-scale" ref={headerRef} aria-hidden>
               <div ref={headerInnerRef} style={{ width: chartWidth, position: 'relative', height: '100%' }}>
-                <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} />
+                <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} format={level.format} />
               </div>
             </div>
             <div className="gx-chart" ref={chartRef} onScroll={onScroll} tabIndex={0} role="region" aria-label={m.timeline}
@@ -1423,6 +1443,10 @@ function GanttView(props: CoreProps & {
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
       {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}
+      {problemsAt && <Popover x={problemsAt.x} y={problemsAt.y} label={m.problemsTitle} onClose={() => setProblemsAt(null)}>
+        <ProblemList doc={data} issues={analysis?.issues ?? []} why={whyNotFix} onFix={(f) => { commit({ type: 'batch', label: 'fix', ops: f.ops as DataOperation[] }); say(f.label); }}
+          onShow={(id) => { select([{ type: 'row', taskId: id }]); scrollToTask(id); }} />
+      </Popover>}
       {pop?.kind === 'columns' && <Popover x={pop.x} y={pop.y} label={m.columns} onClose={() => setPop(null)}>
         <ColumnsPanel all={allCols} shown={cols} frozen={frozen} onChange={(n, fr) => setColumns(n, fr)} />
       </Popover>}
@@ -1454,7 +1478,8 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     if (!p.scheduled) return null;
     const pos = bars.get(b.taskId)!;
     const t = p.task;
-    const x = xOf(scale, p.start!), w = Math.max(2, (p.end! - p.start! + 1) * scale.pxPerDay);
+    // Hour-based work uses only part of its last day (G4).
+    const x = xOf(scale, p.start!), w = Math.max(2, (p.end! - p.start! + (p.endFraction ?? 1)) * scale.pxPerDay);
     const key = r.lane ? `bar:${t.id}` : `row:${r.taskId}`;
     const sel = selKeys.has(key) || selKeys.has(`bar:${t.id}`);
     const isSummary = t.type === 'summary' || (!r.lane && (model.children.get(t.id)?.length ?? 0) > 0);
@@ -1478,8 +1503,14 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
     const ghost = was?.scheduled && (was.start !== p.start || was.end !== p.end)
       ? <div key={t.id + ':ghost'} className="gx-ghost" aria-hidden style={{ left: xOf(scale, was.start!), top: pos.y, width: Math.max(2, (was.end! - was.start! + 1) * scale.pxPerDay), height: pos.h }} />
       : null;
-    return [ghost,
-      <div key={t.id} data-task={t.id} className={`${cls}${compare?.diff.has(t.id) ? ' gx-diff' : ''}`} style={{ left: x, top: pos.y, width: w, height: pos.h }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}>
+    const lateEnd = ctx.slack?.get(t.id);
+    const slackBar = lateEnd !== undefined && lateEnd > p.end!
+      ? <div key={t.id + ':slack'} className="gx-slack" aria-hidden style={{ left: x + w, top: pos.y + pos.h / 2 - 2, width: (lateEnd - p.end!) * scale.pxPerDay }} />
+      : null;
+    const segs = p.segments;
+    return [ghost, slackBar,
+      <div key={t.id} data-task={t.id} className={`${cls}${compare?.diff.has(t.id) ? ' gx-diff' : ''}${segs ? ' gx-split' : ''}`} style={{ left: x, top: pos.y, width: w, height: pos.h }} onClick={onClick} onPointerMove={tipOn} onPointerLeave={tipOff}>
+        {segs && segs.map(([a, b], i) => <span key={i} className="gx-piece" aria-hidden style={{ left: (a - p.start!) * scale.pxPerDay, width: (b - a + 1) * scale.pxPerDay }} />)}
         {!isSummary && <div className="gx-progress" style={{ width: `${Math.round(p.progress * 100)}%` }} />}
         {ctx.barTemplate && !isGroupId(t.id) ? <ctx.barTemplate task={t} placed={p} /> : <span className={`gx-bar-label${w < 60 ? ' gx-outside' : ''}`}>{t.name}</span>}
         {!isSummary && <>
@@ -1509,14 +1540,14 @@ const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, 
   })}</>;
 });
 
-const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale }: { scale: Scale; major: 'year' | 'quarter' | 'month'; minor: 'month' | 'week' | 'day'; from: number; to: number; locale?: string }) {
+const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale, format }: { scale: Scale; major: ScaleUnit; minor: ScaleUnit; from: number; to: number; locale?: string; format?: ZoomLevel['format'] }) {
   return <>
-    {ticks(scale, major, from, to, locale).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
-    {ticks(scale, minor, from, to, locale).map((t) => <div key={'m' + t.day} className="gx-tick gx-minor" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
+    {ticks(scale, major, from, to, locale, format?.[major]).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
+    {ticks(scale, minor, from, to, locale, format?.[minor]).map((t) => <div key={'m' + t.day} className="gx-tick gx-minor" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
   </>;
 });
 
-const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, model, shade }: { scale: Scale; minor: 'month' | 'week' | 'day'; from: number; to: number; model: Model; shade: boolean }) {
+const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, model, shade }: { scale: Scale; minor: ScaleUnit; from: number; to: number; model: Model; shade: boolean }) {
   const out: ReactNode[] = [];
   const cal = model.placement.calendar;
   if (shade && scale.pxPerDay >= 8) {
@@ -1595,3 +1626,24 @@ function linkTip(l: Link, mdl: Model, { t: m }: I18n) {
   return <><strong>{m.linkType[l.type]}{l.lag ? ` +${l.lag}` : ''}</strong><div>{m.linkSentence[l.type](mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target)}</div></>;
 }
 export { fromDay };
+
+/** Scheduling problems, each explained, with fixes that run as one undoable change (C5). */
+function ProblemList({ doc, issues, why, onFix, onShow }: { doc: RoadmapDocument; issues: ScheduleIssue[]; why: (f: IssueFix) => string | null; onFix: (f: IssueFix) => void; onShow: (taskId: string) => void }) {
+  const { t: m } = useI18n();
+  if (!issues.length) return <p className="gx-muted">{m.noProblems}</p>;
+  return (
+    <ul className="gx-list gx-problems">
+      {issues.map((iss, i) => (
+        <li key={i} className="gx-problem" data-kind={iss.kind}>
+          <div>{iss.taskId ? <button className="gx-link-btn" onClick={() => onShow(iss.taskId!)}>{iss.message}</button> : iss.message}
+            {iss.by ? <span className="gx-muted"> · {m.lateBy(String(iss.by))}</span> : null}</div>
+          <div className="gx-row-actions">
+            {fixesFor(doc, iss).map((f) => { const w = why(f); return (
+              <button key={f.label} className="gx-btn gx-small" aria-disabled={!!w || undefined} title={w ?? undefined} onClick={() => { if (!w) onFix(f); }}>{f.label}</button>
+            ); })}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}

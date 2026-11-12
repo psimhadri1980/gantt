@@ -1,5 +1,5 @@
 import type { Issue, RoadmapDocument, Task } from '@gantt/contract';
-import { buildCalendars, fromDay, toDay, WorkCalendar, type DayNum } from './calendar.ts';
+import { buildCalendars, fromDay, spanOf, toDay, workDays, WorkCalendar, type DayNum } from './calendar.ts';
 
 /** A task with its resolved span. `start`/`end` are inclusive day numbers; absent when unscheduled. */
 export interface PlacedTask {
@@ -10,6 +10,10 @@ export interface PlacedTask {
   duration?: number;
   progress: number;
   scheduled: boolean;
+  /** Pieces of a split task (D12); one piece otherwise. */
+  segments?: [DayNum, DayNum][];
+  /** Share of the last day the work uses (hour-based tasks, G4); 1 for whole days. */
+  endFraction?: number;
 }
 
 export interface Placement {
@@ -27,6 +31,8 @@ export interface Placement {
 export function place(doc: RoadmapDocument): Placement {
   const cals = buildCalendars(doc.calendars);
   const calendar = (doc.roadmap.defaultCalendar && cals.get(doc.roadmap.defaultCalendar)) || new WorkCalendar();
+  const hpd = new Map((doc.calendars ?? []).map((c) => [c.id, c.hoursPerDay ?? 8]));
+  const defHpd = hpd.get(doc.roadmap.defaultCalendar ?? '') ?? 8;
   const byId = new Map<string, PlacedTask>();
   const children = new Map<string | null, Task[]>();
   const errors: Issue[] = [];
@@ -36,15 +42,18 @@ export function place(doc: RoadmapDocument): Placement {
     (children.get(t.parent) ?? children.set(t.parent, []).get(t.parent)!).push(t);
     const p: PlacedTask = { task: t, progress: t.progress ?? 0, scheduled: false };
     if (t.type !== 'summary' && t.start) {
-      const s = calendar.nextWorking(toDay(t.start));
-      let dur = t.type === 'milestone' ? 0 : t.duration;
-      if (dur === undefined && t.end) dur = calendar.workingDaysBetween(s, toDay(t.end));
-      const e = calendar.endOf(s, dur ?? 1);
-      if (t.end && t.type === 'task' && t.duration !== undefined && toDay(t.end) !== e) {
-        errors.push({ path: `tasks[${i}].end`, message: `does not agree with start and duration (expected ${fromDay(e)})` });
+      // The task's own calendar (C8), else the roadmap's.
+      const cal = (t.calendar && cals.get(t.calendar)) || calendar;
+      const s = cal.nextWorking(toDay(t.start));
+      let work = workDays(t, (t.calendar && hpd.get(t.calendar)) || defHpd);
+      if (t.duration === undefined && t.end && t.type !== 'milestone') work = cal.workingDaysBetween(s, toDay(t.end));
+      const sp = spanOf(cal, s, work, t.splits);
+      if (t.end && t.type === 'task' && t.duration !== undefined && !t.splits?.length && toDay(t.end) !== sp.end) {
+        errors.push({ path: `tasks[${i}].end`, message: `does not agree with start and duration (expected ${fromDay(sp.end)})` });
       }
       if (s !== toDay(t.start)) warnings.push({ path: `tasks[${i}].start`, message: `is not a working day; placed on ${fromDay(s)}` });
-      Object.assign(p, { start: s, end: e, duration: dur ?? 1, scheduled: true });
+      Object.assign(p, { start: s, end: sp.end, duration: t.type === 'milestone' ? 0 : t.durationUnit === 'hour' ? work : Math.round(work), scheduled: true,
+        segments: sp.segments.length > 1 ? sp.segments : undefined, endFraction: sp.endFraction < 1 ? sp.endFraction : undefined });
     }
     byId.set(t.id, p);
   });
