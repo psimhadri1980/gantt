@@ -1,0 +1,15 @@
+{
+  "name": "@gantt/ssr-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@gantt/react": "*",
+    "@gantt/access": "*",
+    "@gantt/mock": "*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

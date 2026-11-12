@@ -14,7 +14,8 @@
     "generate": "node --experimental-strip-types packages/mock/src/cli.ts",
     "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run e2e",
     "bench": "node scripts/bench.mjs",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "docs:api": "node scripts/api-docs.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

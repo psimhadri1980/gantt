@@ -1069,6 +1069,46 @@ for (const theme of ['Light', 'Dark']) {
   });
 }
 
+// Server rendering (J2): the example app in apps/ssr renders with react-dom/server; the browser hydrates that HTML.
+// Runs outside test(), which opens the demo; this one opens its own server.
+if (!only || only.test('server rendering')) {
+  const name = 'server-rendered HTML holds the chart and hydrates with no mismatch and no layout jump (J2)';
+  const { start } = await import('../apps/ssr/server.mjs');
+  const stop = await start(5193);
+  try {
+    // 1. Without JavaScript the page already shows rows and bars.
+    const bare = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 1440, height: 900 } });
+    const p0 = await bare.newPage();
+    await p0.goto('http://127.0.0.1:5193/');
+    const where = (p) => p.evaluate(() => ({
+      rows: document.querySelectorAll('.gx-grid [role="row"]').length,
+      bars: [...document.querySelectorAll('.gx-bar')].slice(0, 5).map((b) => [b.offsetLeft, b.offsetTop, b.offsetWidth]),
+      grid: document.querySelector('.gx-grid')?.getBoundingClientRect().width,
+    }));
+    const before = await where(p0);
+    await bare.close();
+    if (before.rows < 5 || before.bars.length < 5) throw new Error(`server HTML is missing the chart: ${JSON.stringify(before)}`);
+    // 2. With JavaScript: hydration reports no mismatch, nothing errors, and the bars stay where the server put them.
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.goto('http://127.0.0.1:5193/');
+    await page.waitForFunction(() => window.hydrated);
+    await page.waitForTimeout(500);
+    const after = await where(page);
+    const mismatch = await page.evaluate(() => window.hydrationErrors);
+    await page.close();
+    if (mismatch.length) throw new Error(`hydration mismatch: ${mismatch.join('; ').slice(0, 300)}`);
+    if (errors.length) throw new Error(`page errors: ${errors.join('; ').slice(0, 300)}`);
+    expectEq(JSON.stringify(after), JSON.stringify(before), 'layout after hydration');
+    results.push(`  PASS  ${name}`);
+  } catch (e) {
+    failures++;
+    results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n').slice(0, 3).join('\n        ')}`);
+  } finally { await stop(); }
+}
+
 await browser.close();
 await server.close();
 console.log(results.join('\n'));

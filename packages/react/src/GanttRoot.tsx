@@ -53,7 +53,9 @@ export const Gantt = forwardRef<GanttHandle, GanttRootProps>(function Gantt(prop
   const evaluator = useMemo(() => new AccessEvaluator(rules, props.conditions), [rulesKey, props.conditions]); // eslint-disable-line react-hooks/exhaustive-deps
   // Filtering for the user (L12) runs in a task of its own, so it never lengthens the first-render task
   // (budget: no task over 100 ms). Until it is ready the previous view stays, or the loading state shows.
-  const [filtered, setFiltered] = useState<{ src: RoadmapDocument; ev: AccessEvaluator; doc: RoadmapDocument } | null>(null);
+  // With `ssr` the first filtering runs during render, so server HTML and the first browser render agree (J2).
+  const [filtered, setFiltered] = useState<{ src: RoadmapDocument; ev: AccessEvaluator; doc: RoadmapDocument } | null>(() =>
+    props.ssr && props.data && !props.backend && evaluator.canView ? { src: props.data, ev: evaluator, doc: filterDocument(props.data, evaluator) } : null);
   useEffect(() => {
     const src = props.data;
     if (!src || props.backend || !evaluator.canView) return;

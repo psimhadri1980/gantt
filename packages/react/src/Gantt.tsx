@@ -39,6 +39,11 @@ export interface GanttProps {
    * the table, toolbar and details panel are mirrored; the timeline itself still runs left to right (earlier dates left).
    */
   dir?: 'ltr' | 'rtl';
+  /**
+   * Server rendering (J2): place the first document synchronously during render, so the HTML from
+   * `renderToString` (or a framework such as Next.js) already holds the chart and hydration matches it.
+   */
+  ssr?: boolean;
   /** First day of the week for week ticks: 0 = Sunday … 6 = Saturday. Defaults from `locale` (Monday if unknown). */
   weekStart?: number;
   /** Vertical markers (F7) in addition to today. */
@@ -388,7 +393,9 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
     }).catch((e: unknown) => mark(e instanceof Error ? e.message : String(e)))
       .finally(() => loadingRef.current.delete(id));
   }, []);
-  const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(null);
+  // With `ssr` the first placement runs synchronously, so the server's HTML and the browser's first render
+  // (hydration) show the same bars instead of a loading state. Later changes go to the worker as usual.
+  const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(() => (props.ssr ? { data: doc, model: buildModel(doc, place(doc)) } : null));
   /** The working document as it is now; the rendered one may lag while the engine places a change. */
   const latestDoc = useCallback(() => docRef.current, []);
   const [failure, setFailure] = useState<{ doc: RoadmapDocument; message: string } | null>(null);
