@@ -6,7 +6,6 @@ export type ValidationResult =
   | { ok: false; errors: Issue[]; warnings: Issue[] };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z?$/;
 
 export function isIsoDate(v: unknown): v is string {
   if (typeof v !== 'string' || !DATE_RE.test(v)) return false;
@@ -33,7 +32,8 @@ const KNOWN: Record<string, string[]> = {
 export function validate(input: unknown): ValidationResult {
   const errors: Issue[] = [];
   const warnings: Issue[] = [];
-  const err = (path: string, message: string) => errors.push({ path, message });
+  // Records one problem; returns nothing, so `return err(…)` can end a check early.
+  const err = (path: string, message: string): void => { errors.push({ path, message }); };
   const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
   const str = (o: Record<string, unknown>, k: string, p: string, required = true) => {
     if (o[k] === undefined) { if (required) err(`${p}.${k}`, 'is required'); return; }

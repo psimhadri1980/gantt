@@ -15,20 +15,31 @@
     "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run e2e",
     "bench": "node scripts/bench.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "docs:api": "node scripts/api-docs.mjs"
+    "docs:api": "node scripts/api-docs.mjs",
+    "lint": "eslint --max-warnings=0 ."
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.5.0",
-    "ajv": "^8.17.1",
+    "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "axe-core": "^4.10.3",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
     "jsdom": "^26.1.0",
     "playwright-core": "^1.55.0",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.72.2",
     "vite": "^6.3.5",
-    "vitest": "^3.2.0"
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.8"
+    }
   }
 }

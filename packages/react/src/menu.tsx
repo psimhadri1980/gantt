@@ -26,9 +26,11 @@ export function ContextMenu({ x, y, items, onClose, label }: { x: number; y: num
   // Only on open and close: the caller's onClose changes on every render, and re-running this would move focus away.
   const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
+    // The element focused when this opened; focus goes back to it on close.
+    const opener = returnTo.current as HTMLElement | null;
     const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) closeRef.current(); };
     window.addEventListener('pointerdown', away, true);
-    return () => { window.removeEventListener('pointerdown', away, true); (returnTo.current as HTMLElement | null)?.focus?.({ preventScroll: true }); };
+    return () => { window.removeEventListener('pointerdown', away, true); opener?.focus?.({ preventScroll: true }); };
   }, []);
   const onKey = (e: React.KeyboardEvent) => {
     const all = [...ref.current!.querySelectorAll<HTMLElement>('[role^="menuitem"]')];

@@ -8,7 +8,7 @@ export function writeCsv(rows: string[][]): string {
 
 /** Reads CSV (comma or semicolon separated, as spreadsheets in some locales write it). */
 export function readCsv(text: string): string[][] {
-  const src = text.replace(/^﻿/, '');
+  const src = text.replace(/^\uFEFF/, '') /* byte-order mark */;
   const firstLine = src.slice(0, src.search(/\r?\n|$/));
   const sep = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ';' : ',';
   const rows: string[][] = [];

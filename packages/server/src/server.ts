@@ -65,6 +65,8 @@ function cors(res: ServerResponse, origin?: string) {
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
 }
+/** Reads a JSON request body (at most 5 MB). Its fields are untyped here; the service checks each one it uses. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- request bodies are checked field by field by the service
 async function readJson(req: IncomingMessage): Promise<Record<string, any>> {
   let raw = '';
   for await (const chunk of req) { raw += chunk; if (raw.length > 5_000_000) throw new ServiceError('Request too large', 'invalid'); }

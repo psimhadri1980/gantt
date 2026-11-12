@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   checks:
-    name: Boundaries, types and unit tests
+    name: Static checks and unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -28,7 +28,27 @@ jobs:
       - run: npm ci
       - run: npm run check:boundaries
       - run: npm run typecheck
+      - run: npm run lint
+      # The API reference in docs/api is generated from the sources; fail if a change was not regenerated.
+      - run: npm run docs:api -- --check
       - run: npm test
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # Known vulnerabilities in installed packages. Runtime dependencies fail on moderate and above;
+      # development-only tools (bundler, test runner) fail on high and above.
+      - run: npm audit --omit=dev --audit-level=moderate
+      - run: npm audit --audit-level=high
+      # Every installed package's registry signature and provenance attestation is checked.
+      - run: npm ci --ignore-scripts && npm audit signatures
 
   e2e:
     name: End-to-end (Chrome)

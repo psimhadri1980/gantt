@@ -331,7 +331,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
       return { inverse };
     },
     (op) => { if (!viewRef.current) throw new Error('the chart is still loading'); viewRef.current.apply(op); },
-  ), []);
+  ), []); // eslint-disable-line react-hooks/exhaustive-deps -- one pipeline per Gantt; recordHistory reads only refs and a state setter
   const run = useCallback((op: GanttOperation, source: OperationContext['source'] = 'api') =>
     pipeline.run(op, { source, by: propsRef.current.userId }), [pipeline]);
 
@@ -445,9 +445,9 @@ function ErrorState(props: GanttProps & { message: string; retry: () => void; th
 
 /** Catches a rendering failure so the host page survives and the user sees the error state with a retry. */
 class ViewBoundary extends Component<{ fallback: (message: string) => ReactNode; children: ReactNode }, { message: string | null }> {
-  state = { message: null as string | null };
+  override state = { message: null as string | null };
   static getDerivedStateFromError(e: unknown) { return { message: e instanceof Error ? e.message : String(e) }; }
-  render() { return this.state.message !== null ? this.props.fallback(this.state.message) : this.props.children; }
+  override render() { return this.state.message !== null ? this.props.fallback(this.state.message) : this.props.children; }
 }
 
 function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> }) {
@@ -827,7 +827,7 @@ function GanttView(props: CoreProps & {
   const editTask = useCallback((taskId: string, fields: Partial<Task>) => run({ type: 'task.update', id: taskId, fields }, 'user'), [run]);
   const whyNotLinkEdit = useCallback(() => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
-    return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? m.missingPermission('link.modify') : null;
+    return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? i18n.t.missingPermission('link.modify') : null;
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   const editLink = useCallback((id: string, fields: Partial<Link>) => run({ type: 'link.update', id, fields }, 'user').then((r) => { if (!r.ok) setAnnounce(r.reason); }), [run]);
   const editMany = useCallback((ids: string[], fields: Partial<Task>) => run({ type: 'batch', label: 'bulk', ops: ids.map((id) => ({ type: 'task.update' as const, id, fields })) }, 'user')
@@ -844,7 +844,7 @@ function GanttView(props: CoreProps & {
   const whyNotLinkFor = useCallback((src: string, tgt: string, type: Link['type']) => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
     const ev = props.evaluator;
-    if (ev && !ev.can('link.create', { project: data.roadmap.id })) return m.missingPermission('link.create');
+    if (ev && !ev.can('link.create', { project: data.roadmap.id })) return i18n.t.missingPermission('link.create');
     return whyNotLink(dataRef.current, src, tgt, type);
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   /** Tasks the keyboard edits act on: the selection, else the focused row. */

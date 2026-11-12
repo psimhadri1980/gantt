@@ -7,7 +7,7 @@ import { expandPlacement, place, schedule, type CompactPlacement, type Placement
  */
 let worker: Worker | null | undefined;
 let seq = 0;
-const pending = new Map<number, { resolve: (p: any) => void; reject: (e: Error) => void }>();
+const pending = new Map<number, { resolve: (p: never) => void; reject: (e: Error) => void }>();
 
 function getWorker(): Worker | null {
   if (worker !== undefined) return worker;
@@ -17,7 +17,7 @@ function getWorker(): Worker | null {
     worker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; placement?: CompactPlacement; schedule?: unknown; ms?: number; error?: string }>) => {
       const p = pending.get(e.data.id); if (!p) return;
       pending.delete(e.data.id);
-      e.data.ok ? p.resolve(e.data.schedule ? { schedule: e.data.schedule, ms: e.data.ms } : e.data.placement!) : p.reject(new Error(e.data.error));
+      e.data.ok ? p.resolve((e.data.schedule ? { schedule: e.data.schedule, ms: e.data.ms } : e.data.placement!) as never) : p.reject(new Error(e.data.error));
     };
     worker.onerror = (e) => {
       e.preventDefault();

@@ -108,8 +108,9 @@ export function RefreshDialog({ preview, choices, setChoices, m, onConfirm, onCa
   const ref = useRef<HTMLDivElement>(null);
   const returnTo = useRef<Element | null>(document.activeElement);
   useEffect(() => {
+    const opener = returnTo.current as HTMLElement | null; // focus returns here when the dialog closes
     ref.current?.querySelector<HTMLElement>('h2')?.focus();
-    return () => { (returnTo.current as HTMLElement | null)?.focus?.({ preventScroll: true }); };
+    return () => { opener?.focus?.({ preventScroll: true }); };
   }, []);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(Object.entries(choices).filter(([, c]) => typeof c === 'object').map(([k]) => k)));
   const all = (v: 'incoming' | 'mine') => setChoices(Object.fromEntries(preview.overlaps.map((o) => [o.taskId, v])));
