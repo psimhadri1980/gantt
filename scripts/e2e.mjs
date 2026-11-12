@@ -704,6 +704,50 @@ await test('a backlog item dragged onto the chart becomes a task there (D5)', as
   await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).waitFor({ state: 'detached' });
 });
 
+// ---------- Phase 10: interchange and platform ----------
+async function exportFile(page, label) {
+  await page.getByRole('button', { name: 'Export' }).click();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: label }).click()]);
+  const path = await dl.path();
+  return { name: dl.suggestedFilename(), bytes: readFileSync(path) };
+}
+
+await test('export to PNG, PDF, Excel, CSV and Microsoft Project produces valid files (I2, I3, I4)', async (page) => {
+  const png = await exportFile(page, 'Image (PNG)');
+  expectEq(png.bytes.subarray(1, 4).toString(), 'PNG', 'PNG signature');
+  if (png.bytes.length < 5000) throw new Error('PNG suspiciously small');
+  const pdf = await exportFile(page, 'PDF');
+  expectEq(pdf.bytes.subarray(0, 5).toString(), '%PDF-', 'PDF header'); expectEq(pdf.name, 'Platform-migration.pdf', 'file name');
+  if (!pdf.bytes.toString('latin1').includes('/DCTDecode') || !pdf.bytes.toString('latin1').trimEnd().endsWith('%%EOF')) throw new Error('PDF without image or trailer');
+  const xlsx = await exportFile(page, 'Excel workbook');
+  expectEq(xlsx.bytes.subarray(0, 2).toString(), 'PK', 'xlsx is a ZIP');
+  const csv = await exportFile(page, 'CSV');
+  if (!csv.bytes.toString('utf8').includes('Data model')) throw new Error('CSV without tasks');
+  const xml = await exportFile(page, 'Microsoft Project XML');
+  if (!xml.bytes.toString('utf8').includes('<Name>Data model</Name>')) throw new Error('MSPDI without tasks');
+});
+
+await test('import from CSV and Microsoft Project applies as one undoable change (I1, I4)', async (page) => {
+  const csv = (await exportFile(page, 'CSV')).bytes.toString('utf8').replace('Data model', 'Data model (imported)');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'plan.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').name === 'Data model (imported)');
+  await page.locator('.gx-notice', { hasText: 'plan.csv: 1 changes imported' }).waitFor(); // exactly the one real change
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').name === 'Data model');
+  const xml = (await exportFile(page, 'Microsoft Project XML')).bytes.toString('utf8').replace('<Name>Pilot</Name>', '<Name>Pilot (from Project)</Name>');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'plan.xml', mimeType: 'application/xml', buffer: Buffer.from(xml) });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't16').name === 'Pilot (from Project)');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from('name,duration\nX,three\n') });
+  await page.locator('.gx-notice', { hasText: /bad.csv could not be imported: row 2.duration/ }).waitFor();
+});
+
+await test('full screen mode (G8)', async (page) => {
+  await page.getByRole('button', { name: 'Full screen' }).click();
+  await page.waitForFunction(() => document.fullscreenElement?.classList.contains('gx-root'));
+  await page.getByRole('button', { name: 'Exit full screen' }).click();
+  await page.waitForFunction(() => !document.fullscreenElement);
+});
+
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------
 async function proposals(page) {
   await page.goto('http://127.0.0.1:5192/?sample=proposals');
@@ -931,6 +975,17 @@ await test('an earlier version is restored only through a new Proposal; the summ
   expectEq(await page.evaluate(() => window.svc.snapshot('erin').current.tasks.find((t) => t.id === 't3').name), 'Arch review v2', 'Current is unchanged until approval');
   await page.keyboard.press('Escape');
   await page.locator('.gx-details dd', { hasText: /^1$/ }).first().waitFor(); // Open proposals: 1
+});
+
+await test('an import in the Proposal workflow lands in a Proposal, never in Current (I1, K0)', async (page) => {
+  await proposals(page);
+  await page.locator('.gx-bar[data-task="t7"]').waitFor();
+  const csv = (await exportFile(page, 'CSV')).bytes.toString('utf8').replace('Data model', 'Data model v2');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'plan.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await page.locator('.gx-pbar .gx-state', { hasText: 'Draft' }).waitFor();
+  expectEq(await page.evaluate(() => window.svc.snapshot('erin').current.tasks.find((t) => t.id === 't7').name), 'Data model', 'Current unchanged');
+  const p = await page.evaluate(() => window.svc.snapshot('alice').proposals[0]);
+  expectEq(await page.evaluate((id) => window.svc.proposalDocument('alice', id).tasks.find((t) => t.id === 't7').name, p.id), 'Data model v2', 'the Proposal has it');
 });
 
 await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', async (page) => {

@@ -19,6 +19,8 @@ import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBloc
 import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
 import type { PlacedTask } from '@gantt/engine';
 import { ProgressLineLayer, SCurveChart } from './tracking.tsx';
+import { canvasBlob, download, importOperations, pdfFromJpeg, renderChartImage } from './exporters.ts';
+import { fromCsv, fromMsProject, fromXlsx, MSPDI_FIELDS, TABLE_FIELDS, toCsv, toMsProject, toXlsx } from '@gantt/interchange';
 import { Backlog, LoadPanel, type BacklogItem } from './resources.tsx';
 import './gantt.css';
 
@@ -96,6 +98,8 @@ export interface GanttProps {
   tooltipTemplate?: ComponentType<{ task: Task; placed: PlacedTask; Default: ReactNode }>;
   /** Compact mode for small screens (F5): `'auto'` (default) switches it on below 720 px. */
   compact?: boolean | 'auto';
+  /** Called before a file is saved (I2–I4); return false to handle the file yourself instead of the download. */
+  onExport?: (e: { format: ExportFormat; blob: Blob; filename: string }) => boolean | void;
   /** Unplanned work to drag onto the chart (D5); `onBacklogUsed` tells the host which item became which task. */
   backlog?: BacklogItem[];
   onBacklogUsed?: (item: BacklogItem, taskId: string) => void;
@@ -103,6 +107,7 @@ export interface GanttProps {
   scaleRange?: { start?: string; end?: string };
 }
 export type { GridColumn, CellProps, GanttViewState, SavedView };
+export type ExportFormat = 'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi';
 
 /** Imperative handle (H3): `const ref = useRef<GanttHandle>(null); <Gantt ref={ref} … />`. */
 export interface GanttHandle {
@@ -1278,6 +1283,56 @@ function GanttView(props: CoreProps & {
     }
     return null;
   };
+  // ---------- Interchange (I1–I4) and full screen (G8) ----------
+  const [exportAt, setExportAt] = useState<{ x: number; y: number } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportAs = async (format: ExportFormat) => {
+    try {
+      const doc = props.latestDoc();
+      const stem = (doc.roadmap.name || 'roadmap').replace(/[^\w.-]+/g, '-');
+      let blob: Blob;
+      if (format === 'csv') blob = new Blob([toCsv(doc)], { type: 'text/csv;charset=utf-8' });
+      else if (format === 'xlsx') blob = new Blob([toXlsx(doc) as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      else if (format === 'mspdi') blob = new Blob([toMsProject(doc)], { type: 'application/xml' });
+      else {
+        // The image follows the theme: colours come from the component's CSS variables.
+        const cs = getComputedStyle(rootRef.current!);
+        const v = (n: string, d: string) => cs.getPropertyValue(n).trim() || d;
+        const canvas = renderChartImage({
+          rows, model, level, locale, title: doc.roadmap.name, today: todayDay,
+          colors: { bg: v('--gx-bg', '#fff'), text: v('--gx-text', '#111'), muted: v('--gx-muted', '#666'), grid: v('--gx-grid', '#eee'), bar: v('--gx-task', '#3b6fd8'), summary: v('--gx-text', '#333'), milestone: v('--gx-critical', '#b42318'), link: v('--gx-muted', '#888'), today: v('--gx-critical', '#c00') },
+        });
+        if (format === 'png') blob = await canvasBlob(canvas, 'image/png');
+        else blob = pdfFromJpeg(new Uint8Array(await (await canvasBlob(canvas, 'image/jpeg', 0.92)).arrayBuffer()), canvas.width, canvas.height, doc.roadmap.name);
+      }
+      const filename = `${stem}.${format === 'mspdi' ? 'xml' : format}`;
+      if (props.onExport?.({ format, blob, filename }) !== false) download(blob, filename);
+    } catch (e) { say(m.exportFailed((e as Error).message)); }
+  };
+  const importFile = async (file: File) => {
+    const doc = props.latestDoc();
+    const base = { contract: doc.contract, roadmap: doc.roadmap, calendars: doc.calendars, resources: doc.resources };
+    const name = file.name.toLowerCase();
+    const r = name.endsWith('.csv') || name.endsWith('.txt') ? fromCsv(await file.text(), base)
+      : name.endsWith('.xlsx') ? await fromXlsx(new Uint8Array(await file.arrayBuffer()), base)
+      : name.endsWith('.xml') ? fromMsProject(await file.text(), base)
+      : { ok: false as const, errors: [{ path: 'file', message: m.importHint }] };
+    if (!r.ok) { say(m.importFailed(file.name, r.errors.slice(0, 3).map((x) => `${x.path}: ${x.message}`).join('; '))); return; }
+    // The import is one change through the usual pipeline: permissions, validation, undo, and in the
+    // Proposal workflow it lands in a Proposal (I1: imports never change Current directly).
+    const ops = importOperations(doc, { ...r.doc, roadmap: doc.roadmap }, name.endsWith('.xml') ? MSPDI_FIELDS : TABLE_FIELDS);
+    if (!ops.length) { say(m.importNothing); return; }
+    void run({ type: 'batch', label: `import ${file.name}`, ops }, 'user').then((x) => say(x.ok ? m.imported(file.name, i18n.num(ops.length)) : m.importFailed(file.name, x.reason)));
+  };
+  const [isFull, setIsFull] = useState(false);
+  useEffect(() => {
+    const on = () => setIsFull(document.fullscreenElement === rootRef.current);
+    document.addEventListener('fullscreenchange', on); return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void rootRef.current?.requestFullscreen?.().catch((e: Error) => say(e.message));
+  };
   // ---------- View tools (D9–D11, D18, D19, F12) ----------
   const [findOpen, setFindOpen] = useState(false);
   const [found, setFound] = useState<{ ids: string[]; i: number }>({ ids: [], i: -1 });
@@ -1403,6 +1458,11 @@ function GanttView(props: CoreProps & {
         <div className="gx-toolbar-row">
           <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit}
             critical={showCritical} setCritical={setShowCritical} runSchedule={runSchedule} scheduleWhyNot={scheduleWhyNot} />
+          <button className="gx-btn" aria-haspopup="menu" aria-expanded={!!exportAt} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setExportAt({ x: r.left, y: r.bottom + 4 }); }}>{m.exportLabel}</button>
+          <button className="gx-btn" title={m.importHint} onClick={() => fileRef.current?.click()}>{m.importLabel}</button>
+          <input ref={fileRef} type="file" hidden accept=".csv,.txt,.xlsx,.xml" aria-label={m.importLabel}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+          <button className="gx-btn" aria-pressed={isFull} onClick={toggleFullscreen}>{isFull ? m.exitFullscreen : m.fullscreen}</button>
           <button className="gx-btn" aria-pressed={showSlack} onClick={() => setShowSlack((v) => !v)}>{m.slackShow}</button>
           {baselines.length > 0 && <label className="gx-inline-label">{m.baselineLabel}{' '}
             <select className="gx-select" value={baselineId} onChange={(e) => setBaselineId(e.target.value)}>
@@ -1551,6 +1611,8 @@ function GanttView(props: CoreProps & {
       {load && <LoadPanel load={load} scale={scale} labelWidth={chartBox.left} innerRef={loadInnerRef} chartWidth={chartWidth} chartVisible={chartBox.width} />}
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
+      {exportAt && <ContextMenu x={exportAt.x} y={exportAt.y} label={m.exportLabel} onClose={() => setExportAt(null)}
+        items={(['png', 'pdf', 'xlsx', 'csv', 'mspdi'] as const).map((f) => ({ label: m.exportAs[f], run: () => void exportAs(f) }))} />}
       {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}
       {problemsAt && <Popover x={problemsAt.x} y={problemsAt.y} label={m.problemsTitle} onClose={() => setProblemsAt(null)}>
         <ProblemList doc={data} issues={analysis?.issues ?? []} why={whyNotFix} onFix={(f) => { commit({ type: 'batch', label: 'fix', ops: f.ops as DataOperation[] }); say(f.label); }}

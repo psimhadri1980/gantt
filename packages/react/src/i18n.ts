@@ -304,6 +304,17 @@ export interface GanttMessages {
   dragToAssign: string;
   backlog: string;
   backlogHint: string;
+  // interchange and platform (Phase 10)
+  exportLabel: string;
+  exportAs: Record<'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi', string>;
+  importLabel: string;
+  importHint: string;
+  imported: (file: string, n: string) => string;
+  importNothing: string;
+  importFailed: (file: string, reason: string) => string;
+  exportFailed: (reason: string) => string;
+  fullscreen: string;
+  exitFullscreen: string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -592,6 +603,16 @@ export const defaultMessages: GanttMessages = {
   dragToAssign: 'Drag onto a bar to assign',
   backlog: 'Backlog',
   backlogHint: 'Drag onto the chart to plan it',
+  exportLabel: 'Export',
+  exportAs: { png: 'Image (PNG)', pdf: 'PDF', xlsx: 'Excel workbook', csv: 'CSV', mspdi: 'Microsoft Project XML' },
+  importLabel: 'Import…',
+  importHint: 'Excel, CSV or Microsoft Project XML',
+  imported: (f, n) => `${f}: ${n} changes imported`,
+  importNothing: 'The file matches the roadmap: nothing to import',
+  importFailed: (f, r) => `${f} could not be imported: ${r}`,
+  exportFailed: (r) => `Export failed: ${r}`,
+  fullscreen: 'Full screen',
+  exitFullscreen: 'Exit full screen',
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
@@ -608,6 +629,7 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     action: { ...defaultMessages.action, ...over.action },
     groupName: { ...defaultMessages.groupName, ...over.groupName },
     progressStatus: { ...defaultMessages.progressStatus, ...over.progressStatus },
+    exportAs: { ...defaultMessages.exportAs, ...over.exportAs },
   };
 }
 

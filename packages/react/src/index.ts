@@ -1,5 +1,5 @@
 export { Gantt, type GanttRootProps as GanttProps } from './GanttRoot.tsx';
-export { type GanttHandle, type ToolbarProps, type GridColumn, type CellProps, type GanttViewState, type SavedView } from './Gantt.tsx';
+export { type GanttHandle, type ToolbarProps, type GridColumn, type CellProps, type GanttViewState, type SavedView, type ExportFormat } from './Gantt.tsx';
 export type { AccessRules, Permission, Rule } from '@gantt/access';
 export { memoryBackend, httpBackend, type GanttBackend } from '@gantt/service';
 export type { DataOperation, GanttOperation, OperationContext, OperationResult, ViewOperation } from '@gantt/state';
