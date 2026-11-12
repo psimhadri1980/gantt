@@ -30,6 +30,10 @@ export interface TaskSchedule {
   drivenBy?: string;
 }
 
+/**
+ * A problem the scheduler found. `kind` says which: a dependency cycle, a link the stored dates break, a constraint
+ * that cannot be met, or a deadline the task finishes after. `taskId`/`linkId` point at what to fix.
+ */
 export interface ScheduleIssue {
   kind: 'cycle' | 'brokenDependency' | 'constraint' | 'deadline';
   taskId?: string;
@@ -43,6 +47,10 @@ export interface ScheduleIssue {
   linkIds?: string[];
 }
 
+/**
+ * What `schedule` returns: the computed dates per task, the edits that would apply them, the problems found,
+ * and the latest finish (undefined for an empty roadmap).
+ */
 export interface ScheduleResult {
   tasks: Map<string, TaskSchedule>;
   /** Changes that bring the stored dates in line with the schedule (K1): start, and end dropped. */
@@ -53,9 +61,18 @@ export interface ScheduleResult {
   end?: DayNum;
 }
 
+/** The four dependency types: finish-to-start, start-to-start, finish-to-finish, start-to-finish. */
 type Kind = Link['type'];
+/**
+ * One dependency in the form the scheduler walks: `to` may not start (or finish) before `from` allows, plus `lag` working days.
+ */
 interface Edge { from: string; to: string; type: Kind; lag: number; linkId: string }
 
+/**
+ * Computes the schedule of a whole roadmap (C1–C8): every task's earliest start and finish from its own date,
+ * its constraint, its predecessors (with lag, on each task's calendar) and its parent's dates. Summaries span their
+ * children. Tasks in a cycle are reported and left at their stored dates. Pure: the document is not changed.
+ */
 export function schedule(doc: RoadmapDocument): ScheduleResult {
   const cals = buildCalendars(doc.calendars);
   const cal = (doc.roadmap.defaultCalendar && cals.get(doc.roadmap.defaultCalendar)) || new WorkCalendar();
@@ -233,6 +250,10 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
   return { tasks, changes, issues, end: end === -Infinity ? undefined : end };
 }
 
+/**
+ * Finds one dependency cycle among `nodes` (the tasks a topological sort could not order), following links and
+ * child-to-parent edges (`agg`). Returns the task ids along the cycle, for the issue message.
+ */
 function findCycle(nodes: Set<string>, out: Map<string, Edge[]>, agg: Map<string, string>): string[] {
   const next = (id: string) => [...(out.get(id) ?? []).map((e) => e.to), ...(agg.has(id) ? [agg.get(id)!] : [])].filter((x) => nodes.has(x));
   const start = nodes.values().next().value as string;

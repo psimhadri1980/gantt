@@ -16,6 +16,10 @@ export type DataOperation =
   /** Several operations as one: one undo step and one set of Proposal changes (an edit plus the dates it moves). */
   | { type: 'batch'; ops: DataOperation[]; label?: string };
 
+/**
+ * Operations that change only what is shown (expanding rows, zoom, selection, scrolling), never the roadmap itself.
+ * They are not saved, not undone and need no permission.
+ */
 export type ViewOperation =
   | { type: 'row.expand'; id: string }
   | { type: 'row.collapse'; id: string }
@@ -24,19 +28,29 @@ export type ViewOperation =
   | { type: 'selection.set'; selection: SelectionTarget[] }
   | { type: 'zoom.set'; zoom: string };
 
+/** Every operation the Gantt accepts: changes to the roadmap and changes to the view. */
 export type GanttOperation = DataOperation | ViewOperation;
 
+/** True for operations that change the roadmap (and so go through permissions, Proposals and undo). */
 export const isDataOperation = (op: GanttOperation): op is DataOperation => /^(task|link)\./.test(op.type) || op.type === 'batch';
 
 /** The single operations inside an operation, in order. */
 export const flattenOps = (op: DataOperation): DataOperation[] => (op.type === 'batch' ? op.ops.flatMap(flattenOps) : [op]);
 
+/** Who made an operation and how: the user in the UI, the host through the API, or undo/redo. */
 export interface OperationContext { by?: string; source: 'user' | 'api' | 'undo' | 'redo' }
 
+/**
+ * The outcome of running an operation: accepted (with the operations that undo it), or refused with the reason
+ * and the stage that refused it (the host's interception, a permission, or validation).
+ */
 export type OperationResult =
   | { ok: true; operation: GanttOperation; inverse?: DataOperation[] }
   | { ok: false; operation: GanttOperation; reason: string; stage: 'intercepted' | 'authorization' | 'invalid' };
 
+/**
+ * Hooks the host gives the pipeline: interception before an operation, and notifications after it runs or is refused.
+ */
 export interface OperationHooks {
   /** Interception: return false or a reason string to refuse. May return a promise (H3). */
   beforeOperation?: (op: GanttOperation, ctx: OperationContext) => boolean | string | void | Promise<boolean | string | void>;
@@ -174,6 +188,7 @@ export class OperationPipeline {
   }
 }
 
+/** True for a promise-like value, so interception may answer synchronously or asynchronously. */
 const isThenable = <T,>(v: unknown): v is Promise<T> => !!v && typeof (v as { then?: unknown }).then === 'function';
 
 /**

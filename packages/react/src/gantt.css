@@ -356,3 +356,14 @@ polyline.gx-sc-baseline { stroke: var(--gx-muted); stroke-dasharray: 5 3; }
 .gx-backlog { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--gx-border); flex-wrap: wrap; font-size: 12px; }
 .gx-backlog-list { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
 .gx-backlog-item { cursor: grab; padding: 3px 10px; }
+
+/* Right-to-left (G14): the root's dir="rtl" mirrors the flex rows (table on the right, details on the left), so only
+   physical-side rules need flipping. The timeline keeps direction: ltr, because dates always run left to right. */
+.gx-root[dir="rtl"] .gx-chart, .gx-root[dir="rtl"] .gx-load-chart { direction: ltr; }
+.gx-root[dir="rtl"] .gx-grid { border-right: 0; border-left: 1px solid var(--gx-border); }
+.gx-root[dir="rtl"] .gx-splitter { right: auto; left: -4px; }
+.gx-root[dir="rtl"] .gx-details { border-left: 0; border-right: 1px solid var(--gx-border); }
+.gx-root[dir="rtl"] .gx-save { margin-left: 0; margin-right: auto; }
+.gx-root[dir="rtl"] .gx-seg .gx-btn { border-right: 0; border-left: 1px solid var(--gx-border); }
+.gx-root[dir="rtl"] .gx-seg .gx-btn:last-child { border-left: 0; }
+.gx-root[dir="rtl"] .gx-history { padding-left: 0; padding-right: 20px; }

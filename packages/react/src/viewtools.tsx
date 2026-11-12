@@ -1,3 +1,6 @@
+/**
+ * View tools (D9–D11, D19): popovers for filter values and columns, the find bar, and the saved-view picker.
+ */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { SavedView } from '@gantt/state';
 import { useI18n } from './i18n.ts';
@@ -16,9 +19,11 @@ export function Popover({ x, y, label, onClose, children }: { x: number; y: numb
   // Only on open and close: the caller's onClose changes on every render, and re-running this would move focus away.
   const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
+    // The element focused when this opened; focus goes back to it on close.
+    const opener = returnTo.current as HTMLElement | null;
     const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) closeRef.current(); };
     window.addEventListener('pointerdown', away, true);
-    return () => { window.removeEventListener('pointerdown', away, true); (returnTo.current as HTMLElement | null)?.focus?.({ preventScroll: true }); };
+    return () => { window.removeEventListener('pointerdown', away, true); opener?.focus?.({ preventScroll: true }); };
   }, []);
   return (
     <div ref={ref} className="gx-popover" role="dialog" aria-label={label} style={{ left: x, top: y }}

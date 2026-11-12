@@ -11,6 +11,7 @@ import { makeI18n, type GanttMessages } from './i18n.ts';
  */
 
 const DAY = 86_400_000;
+/** The display name of a field group ("schedule", "progress"…), or the group id when there is none. */
 const groupText = (m: GanttMessages, g: string) => m.groupName[g] ?? g;
 
 /** The Proposals of this roadmap with owner, state, age, expiry, changes and shared tasks (K11). */
@@ -48,11 +49,13 @@ export function ProposalList({ snap, m, locale, now, open, refresh }: {
   );
 }
 
+/** The fields of a task that belong to the given groups, as "field: value" lines. */
 const fieldsOf = (t: Task | null, groups: string[]) => {
   if (!t) return [];
   const keys = Object.keys(t).filter((k) => k !== 'id' && groups.some((g) => g === k || (g === 'schedule' && ['start', 'end', 'duration', 'durationUnit', 'constraint'].includes(k)) || (g === 'position' && ['parent', 'order'].includes(k))));
   return keys.map((k) => `${k}: ${JSON.stringify((t as Record<string, unknown>)[k])}`);
 };
+/** One person's version of a task, limited to the fields in conflict (or "deleted"). */
 function TaskVersion({ task, groups, m }: { task: Task | null; groups: string[]; m: GanttMessages }) {
   if (!task) return <em>{m.deleted}</em>;
   const lines = fieldsOf(task, groups);
@@ -108,8 +111,9 @@ export function RefreshDialog({ preview, choices, setChoices, m, onConfirm, onCa
   const ref = useRef<HTMLDivElement>(null);
   const returnTo = useRef<Element | null>(document.activeElement);
   useEffect(() => {
+    const opener = returnTo.current as HTMLElement | null; // focus returns here when the dialog closes
     ref.current?.querySelector<HTMLElement>('h2')?.focus();
-    return () => { (returnTo.current as HTMLElement | null)?.focus?.({ preventScroll: true }); };
+    return () => { opener?.focus?.({ preventScroll: true }); };
   }, []);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(Object.entries(choices).filter(([, c]) => typeof c === 'object').map(([k]) => k)));
   const all = (v: 'incoming' | 'mine') => setChoices(Object.fromEntries(preview.overlaps.map((o) => [o.taskId, v])));

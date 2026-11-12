@@ -11,6 +11,10 @@ import type { LinkType, Task } from '@gantt/contract';
  */
 export type DragKind = 'move' | 'start' | 'end' | 'progress' | 'link-start' | 'link-end' | 'create';
 
+/**
+ * What the drag controller needs from the chart: its elements, the current scale and calendar, and callbacks to
+ * check, preview and commit a change.
+ */
 export interface DragHost {
   chart: HTMLElement;
   canvas: HTMLElement;
@@ -33,6 +37,11 @@ export interface DragHost {
   describe: (start: DayNum, end: DayNum, kind: DragKind) => string;
 }
 
+/**
+ * The drag in progress: what is dragged (move, resize either end, progress, a new link from either end, or a new
+ * task drawn on an empty row), where it started,
+ * the pointer's last position and the elements previewed so far.
+ */
 interface Active {
   kind: DragKind;
   id: string;
@@ -56,11 +65,16 @@ interface Active {
 
 const EDGE = 36; // px from the chart edge where the view scrolls by itself
 
+/**
+ * Moving, resizing and linking bars with the pointer (D1, D3, D4). While dragging only the bars' styles change
+ * (no React render per frame); the change is committed as one operation on release and undone on Esc.
+ */
 export class DragController {
   private a: Active | null = null;
   private pointerId = 0;
   constructor(private readonly h: DragHost) {}
 
+  /** True while a drag is in progress. */
   get active() { return this.a !== null; }
 
   /** Starts a drag from a pointerdown. Returns false (and nothing happens) when the change is not allowed. */
@@ -85,6 +99,7 @@ export class DragController {
     return true;
   }
 
+  /** Follows the pointer: records its position and schedules a preview update for the next frame. */
   move(e: PointerEvent | React.PointerEvent) {
     const a = this.a; if (!a) return;
     a.lastX = e.clientX; a.lastY = e.clientY;
@@ -97,6 +112,10 @@ export class DragController {
     this.autoScroll();
   }
 
+  /**
+   * Recomputes the preview from the pointer: the new dates (snapped to working days on the task's calendar), the
+   * bars to move with it, and the tooltip text.
+   */
   private update() {
     const a = this.a!; const sc = this.h.scale(); const cal = this.h.calendar();
     const dx = a.lastX - a.x0 + (this.h.chart.scrollLeft - a.scroll0);
@@ -184,12 +203,14 @@ export class DragController {
       });
     }, 120);
   }
+  /** Removes the preview styles from every bar that was previewed. */
   private clearPreview() {
     const a = this.a; if (!a) return;
     for (const el of a.previewed) { el.style.transform = ''; el.classList.remove('gx-preview'); }
     a.previewed = [];
   }
 
+  /** While drawing a link: finds the bar under the pointer and shows whether a link to it is allowed. */
   private updateLink() {
     const a = this.a!;
     const rect = this.h.canvas.getBoundingClientRect();

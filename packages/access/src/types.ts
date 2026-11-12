@@ -1,3 +1,6 @@
+/**
+ * Access-control types (section L): permissions, subjects, rules with scopes and conditions, and decisions.
+ */
 /** Permission vocabulary (plan section 3). */
 export const PERMISSIONS = [
   'view', 'view.fields', 'view.baselines', 'view.resources', 'view.history',
@@ -9,10 +12,13 @@ export const PERMISSIONS = [
   'resource.assign', 'resource.edit',
   'export', 'import', 'baseline.save',
 ] as const;
+/** One permission name, such as 'view', 'task.modify' or 'proposal.approve'. */
 export type Permission = (typeof PERMISSIONS)[number];
 
+/** Who is asking: a user id with the roles and groups that rules can match. */
 export interface Subject { id: string; roles?: string[]; groups?: string[] }
 
+/** Where a rule applies: projects, and tasks by id, group, type, owner or kind. Empty means everywhere. */
 export interface RuleScope {
   projects?: string[];
   tasks?: { ids?: string[]; groups?: string[]; types?: string[]; owners?: string[]; kinds?: string[] };
@@ -20,6 +26,9 @@ export interface RuleScope {
   proposals?: 'own' | 'any' | string[];
 }
 
+/**
+ * One access rule: allow or deny some permissions, for some roles, within a scope, optionally under a condition.
+ */
 export interface Rule {
   effect: 'allow' | 'deny';
   permissions: Permission[];
@@ -43,6 +52,8 @@ export interface AccessContext {
   field?: string;
 }
 
+/** A host-provided check for rules that depend on the data (for example "only before the freeze date"). */
 export type Condition = (ctx: AccessContext & { subject: Subject }) => boolean;
 
+/** The answer to "may this happen?", with the reason when it may not. */
 export interface Decision { allowed: boolean; reason?: string }

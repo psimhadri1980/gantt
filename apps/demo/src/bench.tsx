@@ -5,12 +5,16 @@ import { Gantt, scheduleOffThread, type AccessRules } from '@gantt/react';
 import { generate, loadMock } from '@gantt/mock';
 import type { RoadmapDocument } from '@gantt/contract';
 
+/** Resolves on the next animation frame with its timestamp. */
 const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
+/** Resolves once the browser has painted: two frames, because the first callback runs before that frame's paint. */
 const painted = async () => { await nextFrame(); await nextFrame(); };
+/** The p-th percentile (0–1) of a list of numbers. */
 const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
 
 let longTasks: number[] = [];
 const phases: Record<string, number> = {};
+/** Ends a measured phase: records its longest main-thread task (from the Long Tasks API) and starts the next. */
 const phase = (name: string) => { phases[name] = Math.round(Math.max(0, ...longTasks)); longTasks = []; };
 new PerformanceObserver((l) => { for (const e of l.getEntries()) longTasks.push(e.duration); }).observe({ type: 'longtask', buffered: false });
 
@@ -27,12 +31,14 @@ const BENCH_ACCESS: AccessRules = {
 };
 const host = document.getElementById('root')!;
 
+/** The benchmark roadmap: 10,000 generated tasks with links, as bars or with lanes, validated like real data. */
 function dataset(layout: 'bars' | 'lanes'): RoadmapDocument {
   const r = loadMock(generate({ tasks: 10000, linkDensity: 0.55, laneEvery: layout === 'lanes' ? 2 : 0 }));
   if (!r.ok) throw new Error('generated data invalid');
   return r.doc;
 }
 
+/** Runs `step` once per frame for `steps` frames and returns the frame-gap statistics (how smooth it was). */
 async function frameStats(steps: number, step: (i: number) => void) {
   const gaps: number[] = [];
   let prev = await nextFrame();
@@ -45,6 +51,9 @@ async function frameStats(steps: number, step: (i: number) => void) {
   return { fps: Math.round(1000 / avg), p95FrameMs: +pct(gaps, 0.95).toFixed(1), worstFrameMs: +Math.max(...gaps).toFixed(1) };
 }
 
+/**
+ * One benchmark run: mounts the Gantt on the generated roadmap, then times the first render, scrolling and zooming.
+ */
 async function run(layout: 'bars' | 'lanes') {
   root?.unmount(); host.innerHTML = '';
   const doc = dataset(layout); // data generation and validation happen before "data arrives"

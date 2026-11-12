@@ -1,8 +1,12 @@
+/**
+ * @gantt/mock: sample roadmaps, a generator for large ones, and the loader that validates mock files.
+ */
 import { validate, type Issue, type RoadmapDocument } from '@gantt/contract';
 import { place } from '@gantt/engine';
 import { fullAccess } from '@gantt/access';
 export { generate, type GenerateOptions } from './generate.ts';
 
+/** The result of loading a mock file: the document (with warnings) or the reasons it was refused. */
 export type LoadResult = { ok: true; doc: RoadmapDocument; warnings: Issue[] } | { ok: false; errors: Issue[]; warnings: Issue[] };
 
 /**

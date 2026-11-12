@@ -304,6 +304,19 @@ export interface GanttMessages {
   dragToAssign: string;
   backlog: string;
   backlogHint: string;
+  // interchange and platform (Phase 10)
+  exportLabel: string;
+  exportAs: Record<'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi', string>;
+  importLabel: string;
+  importHint: string;
+  imported: (file: string, n: string) => string;
+  importNothing: string;
+  importFailed: (file: string, reason: string) => string;
+  exportFailed: (reason: string) => string;
+  fullscreen: string;
+  exitFullscreen: string;
+  /** A refusal for a missing permission (L4), and for one on a single field. */
+  missingPermission: (permission: string, field?: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -592,9 +605,21 @@ export const defaultMessages: GanttMessages = {
   dragToAssign: 'Drag onto a bar to assign',
   backlog: 'Backlog',
   backlogHint: 'Drag onto the chart to plan it',
+  exportLabel: 'Export',
+  exportAs: { png: 'Image (PNG)', pdf: 'PDF', xlsx: 'Excel workbook', csv: 'CSV', mspdi: 'Microsoft Project XML' },
+  importLabel: 'Import…',
+  importHint: 'Excel, CSV or Microsoft Project XML',
+  imported: (f, n) => `${f}: ${n} changes imported`,
+  importNothing: 'The file matches the roadmap: nothing to import',
+  importFailed: (f, r) => `${f} could not be imported: ${r}`,
+  exportFailed: (r) => `Export failed: ${r}`,
+  fullscreen: 'Full screen',
+  exitFullscreen: 'Exit full screen',
+  missingPermission: (p, f) => `Missing permission: ${p}${f ? ` for the field “${f}”` : ''}`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
+/** Combines the host's message overrides with the English defaults; nested message groups merge key by key. */
 export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
   if (!over) return defaultMessages;
   return {
@@ -608,13 +633,29 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     action: { ...defaultMessages.action, ...over.action },
     groupName: { ...defaultMessages.groupName, ...over.groupName },
     progressStatus: { ...defaultMessages.progressStatus, ...over.progressStatus },
+    exportAs: { ...defaultMessages.exportAs, ...over.exportAs },
   };
 }
 
+/**
+ * Shows a refusal reason in the user's language. Reasons are produced in English by the access layer and the
+ * service (they are also logged and matched on); the known patterns are re-worded here, anything else is shown
+ * as it came.
+ */
+export function localizeReason(t: GanttMessages, reason: string | null | undefined): string | null {
+  if (reason == null) return null;
+  const m = /^Missing permission: ([\w.]+)(?: for the field “([^”]+)”)?$/.exec(reason);
+  return m ? t.missingPermission(m[1]!, m[2]) : reason;
+}
+
+/** The active language: the messages, the locale, and number and percentage formatters for it. */
 export interface I18n { t: GanttMessages; locale?: string; num: (n: number) => string; pct: (v: number) => string }
+/** Builds the language context for a set of messages and a locale. */
 export function makeI18n(t: GanttMessages, locale?: string): I18n {
   const nf = new Intl.NumberFormat(locale), pf = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 });
   return { t, locale, num: (n) => nf.format(n), pct: (v) => pf.format(v) };
 }
+/** The language context provided by the Gantt to every part of it. */
 export const I18nContext = createContext<I18n>(makeI18n(defaultMessages));
+/** The current language, for components inside the Gantt. */
 export const useI18n = () => useContext(I18nContext);

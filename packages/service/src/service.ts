@@ -1,3 +1,7 @@
+/**
+ * RoadmapService: the server side of the Proposal workflow. Holds Current and its approved versions and every
+ * Proposal; checks each request against the user's access rules; and emits events for every change.
+ */
 import type { Baseline, ProposalChange, RoadmapDocument, Task } from '@gantt/contract';
 import { AccessEvaluator, checkChange, filterDocument, type AccessRules, type Condition, type Permission } from '@gantt/access';
 import {
@@ -10,6 +14,9 @@ import { place, schedule, takeBaseline } from '@gantt/engine';
 /** A change as a client sends it; the service stamps who and when. */
 export type ChangeInput = Omit<ProposalChange, 'by' | 'at'>;
 
+/**
+ * How this roadmap's Proposal workflow is configured: whether the submitter may also approve, and the time limits.
+ */
 export interface ServiceConfig {
   separationOfDuties: boolean;
   limits: ProposalLimits;
@@ -17,6 +24,11 @@ export interface ServiceConfig {
   expiringLeadMs: number;
 }
 
+/**
+ * What the service announces to subscribers: a Proposal moved through its lifecycle or changed, a deadline is
+ * near or passed, a Proposal became stale because another one was approved, or two people changed the same task.
+ * The server forwards these to browsers as server-sent events.
+ */
 export type ServiceEvent =
   | { type: 'proposalCreated' | 'proposalDiscarded' | 'proposalSubmitted' | 'proposalWithdrawn' | 'proposalReviewed' | 'proposalReturned' | 'proposalRejected' | 'proposalApproved' | 'proposalChanged'; proposal: ProposalSummary; actor: string; reason?: string }
   | { type: 'proposalExpiring' | 'proposalExpired'; proposal: ProposalSummary; phase: string; expiresAt: string }
@@ -42,6 +54,9 @@ export type ProposalSummary = Omit<ProposalRecord, 'changes' | 'beforeRefresh'> 
   actions?: Partial<Record<LifecycleAction, string | null>>;
 };
 
+/**
+ * What one user may see of the roadmap: the configuration, Current (filtered for them) and the Proposals visible to them.
+ */
 export interface Snapshot {
   config: ServiceConfig;
   /** Null when no version has been approved yet (a new roadmap, K0a). */
@@ -76,10 +91,17 @@ export interface RefreshPreview {
   problem: string | null;
 }
 
+/**
+ * A refused request. `code` lets callers (and the HTTP server) tell no access, a missing permission, an unknown id,
+ * invalid input and a conflict with someone else's change apart.
+ */
 export class ServiceError extends Error {
   constructor(message: string, readonly code: 'noAccess' | 'denied' | 'notFound' | 'invalid' | 'conflict') { super(message); }
 }
 
+/**
+ * What a service is created with: the starting roadmap, how to find a user's access rules, and the workflow settings.
+ */
 export interface ServiceOptions {
   /** The first approved version of Current, or null for a roadmap that exists only as Proposals. */
   current: RoadmapDocument | null;
@@ -131,6 +153,7 @@ export class RoadmapService {
     }
   }
 
+  /** Calls `fn` with every event (all users). Returns the function that stops the subscription. */
   subscribe(fn: (e: ServiceEvent) => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
   /** Events for one user only: nothing without view, and only Proposals they may see (L12). */
@@ -155,24 +178,29 @@ export class RoadmapService {
       fn(e);
     });
   }
+  /** Notifies every subscriber of an event. */
   private emit(e: ServiceEvent) { for (const l of this.listeners) l(e); }
 
   /** The evaluator for a user; without `view` nothing is returned (L6). */
   evaluator(userId: string): AccessEvaluator {
     return new AccessEvaluator(this.opts.rulesFor(userId), this.opts.conditions);
   }
+  /** The user's access evaluator; throws `noAccess` when they may not view the roadmap at all. */
   private requireView(userId: string) {
     const ev = this.evaluator(userId);
     if (!ev.canView) throw new ServiceError('No access to this roadmap', 'noAccess');
     return ev;
   }
+  /** Throws `denied` (with the reason) unless the user has the permission, here and for this Proposal. */
   private require(ev: AccessEvaluator, permission: Permission, p?: ProposalRecord) {
     const d = ev.check(permission, { project: this.roadmapInfo.id, proposal: p && { id: p.id, owner: p.owner } });
     if (!d.allowed) throw new ServiceError(d.reason!, 'denied');
   }
+  /** True when the user may see this task (task-level rules: owner, type, group, kind). */
   private canViewTask(ev: AccessEvaluator, t: Task) {
     return ev.can('view', { project: this.roadmapInfo.id, task: { id: t.id, type: t.type, owner: t.owner, kind: t.kind, parent: t.parent } });
   }
+  /** True when the user may see this Proposal: their own, or anyone's with `proposal.viewOthers`. */
   private canSee(ev: AccessEvaluator, p: ProposalRecord) {
     return p.owner === ev.subject.id || ev.can('proposal.viewOthers', { project: this.roadmapInfo.id, proposal: { id: p.id, owner: p.owner } });
   }
@@ -202,6 +230,7 @@ export class RoadmapService {
     return this.withBaselines(filterDocument(this.build(p), ev), ev);
   }
 
+  /** An approved version of the roadmap as it was (needs `view.history`), filtered for the user. */
   versionDocument(userId: string, version: number): RoadmapDocument {
     const ev = this.requireView(userId);
     this.require(ev, 'view.history');
@@ -467,6 +496,10 @@ export class RoadmapService {
     return this.summary(next);
   }
 
+  /**
+   * What refreshing a Proposal onto the latest Current would give with the given choices, without changing anything:
+   * the rebased document, the overlapping tasks and which side each choice keeps.
+   */
   private preview(ev: AccessEvaluator, p: ProposalRecord, choices: Record<string, RefreshChoice>): RefreshPreview {
     const base = this.baseOf(p);
     const curV = this.versions.get(this.currentVersion);
@@ -496,6 +529,7 @@ export class RoadmapService {
       backToDraft: overlaps.length > 0 || newIssues.length > 0, problem,
     };
   }
+  /** The other Proposals that are still open (not approved, rejected or discarded). */
   private openOthers(id: string) { return [...this.proposals.values()].filter((o) => o.id !== id && isOpen(o.state)); }
 
   /**
@@ -573,6 +607,7 @@ export class RoadmapService {
     if (!p) throw new ServiceError(`Unknown Proposal "${id}"`, 'notFound');
     return p;
   }
+  /** The version of Current a Proposal was started from (or last refreshed onto). */
   private baseOf(p: ProposalRecord): RoadmapDocument {
     const v = this.versions.get(p.baseVersion);
     if (v) return v.doc;
@@ -580,14 +615,22 @@ export class RoadmapService {
     const r = this.roadmapInfo;
     return { contract: 'gantt-roadmap/1', roadmap: { id: r.id, name: r.name, version: 0, timeZone: r.timeZone, start: r.start }, tasks: [], links: [] };
   }
+  /**
+   * The roadmap as the Proposal would make it: its base version with its changes applied. Falls back to the base
+   * if the changes no longer apply.
+   */
   private build(p: ProposalRecord): RoadmapDocument {
     const r = applyChanges(this.baseOf(p), effectiveChanges(p));
     return r.ok ? r.doc : this.baseOf(p);
   }
+  /**
+   * A Proposal's summary for one user, with each lifecycle action and the reason that user cannot take it (or null).
+   */
   private summaryFor(userId: string, p: ProposalRecord): ProposalSummary {
     const actions = Object.fromEntries((Object.keys(ACTION_PERMISSION) as LifecycleAction[]).map((a) => [a, this.whyNot(userId, p.id, a)]));
     return { ...this.summary(p), actions };
   }
+  /** A Proposal's summary for everyone: its state, counts and deadlines, without the change list. */
   private summary(p: ProposalRecord): ProposalSummary {
     const { changes, beforeRefresh, ...rest } = p;
     const open = isOpen(p.state);
@@ -602,6 +645,7 @@ export class RoadmapService {
   }
 }
 
+/** The message shown when two people changed the same task and the Proposal must pick a version before going on. */
 const conflictReason = (n: number) => `${n} ${n === 1 ? 'task was' : 'tasks were'} changed by two people at once; pick a version for ${n === 1 ? 'it' : 'each'} first`;
 
 export const ACTION_PERMISSION: Record<LifecycleAction, Permission> = {

@@ -1,5 +1,6 @@
 import { validate, type ProposalChange, type RoadmapDocument } from '@gantt/contract';
 
+/** The document collection each change entity lives in. */
 type Coll = 'tasks' | 'links' | 'resources' | 'calendars';
 const COLL: Record<string, Coll> = { task: 'tasks', link: 'links', resource: 'resources', calendar: 'calendars' };
 
@@ -54,6 +55,7 @@ export function fieldGroup(field: string): string {
   return field;
 }
 
+/** How one task differs between two versions: added, removed, or changed (with the changed fields). */
 export interface TaskDiff { id: string; kind: 'added' | 'removed' | 'changed'; fields: string[] }
 
 /** What differs between two versions of a roadmap, per task (K4). */

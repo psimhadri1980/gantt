@@ -2,6 +2,7 @@ import type { Link } from '@gantt/contract';
 import type { Placement } from '@gantt/engine';
 import { xOf, type Scale } from './scale.ts';
 
+/** A bar's vertical position: top (y) and height in pixels. */
 export interface BarPos { y: number; h: number }
 
 /**

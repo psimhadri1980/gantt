@@ -1,6 +1,8 @@
+// Records a CPU profile of the benchmark page (apps/demo/bench.html, 10,000 tasks) with the CPU slowed 4x, and
+// prints where the time goes. A developer tool for performance work; not run in CI.
 import { preview } from 'vite';
 import { chromium } from 'playwright-core';
-const root = '/home/simhadri/gantt/apps/demo/';
+const root = new URL('../apps/demo/', import.meta.url).pathname;
 const server = await preview({ root, preview: { port: 5191, host: '127.0.0.1' }, logLevel: 'warn' });
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });

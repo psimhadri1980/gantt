@@ -1,5 +1,6 @@
 {
   "name": "@gantt/mock",
+  "description": "Sample roadmaps, a generator for large ones, and the validating loader for mock files.",
   "version": "0.1.0",
   "private": true,
   "type": "module",

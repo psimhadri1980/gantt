@@ -1,6 +1,10 @@
+/**
+ * The demo application: every sample roadmap and option of the Gantt on one page, used for manual testing,
+ * the end-to-end tests (scripts/e2e.mjs) and the benchmarks. `?sample=` picks the sample.
+ */
 import { StrictMode, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Gantt, HOUR_ZOOM, memoryBackend, ZOOM_LEVELS, type GridColumn, type AccessRules, type GanttHandle, type GanttKinds, type GanttMessages, type GanttOperation } from '@gantt/react';
+import { Gantt, HOUR_ZOOM, memoryBackend, germanMessages, ZOOM_LEVELS, type GridColumn, type AccessRules, type GanttHandle, type GanttKinds, type GanttOperation } from '@gantt/react';
 import { RoadmapService } from '@gantt/service';
 import roles from '../../../packages/mock/src/samples/roles.json';
 import { generate, loadMock, splitForLazyLoading } from '@gantt/mock';
@@ -22,13 +26,7 @@ const kinds: GanttKinds = {
 };
 
 // A partial German translation: anything not listed falls back to English (G12).
-const german: Partial<GanttMessages> = {
-  loading: 'Roadmap wird geladen…', zoomLevel: { year: 'Jahre', quarter: 'Quartale', month: 'Monate', week: 'Wochen', day: 'Tage' },
-  today: 'Heute', fit: 'Einpassen', showGrid: 'Tabelle zeigen', hideGrid: 'Tabelle ausblenden', colName: 'Name', colStart: 'Beginn', colDays: 'Tage',
-  unscheduled: 'Nicht geplant', todayMarker: 'Heute', schedule: 'Zeitplan', start: 'Beginn', end: 'Ende', duration: 'Dauer', progress: 'Fortschritt',
-  workingDays: (n) => `${n} Arbeitstage`, saving: 'Wird gespeichert…', saved: 'Gespeichert', notSaved: (r) => `Nicht gespeichert: ${r}`,
-  readOnly: 'Das Diagramm ist schreibgeschützt',
-};
+const german = germanMessages;
 
 // Templates (G7) and a host column (D18), shown with ?templates=1.
 const withTemplates = new URLSearchParams(location.search).has('templates');
@@ -36,11 +34,14 @@ const hostColumns: GridColumn[] = [{
   id: 'owner', label: 'Owner', width: 90, field: 'owner',
   cell: ({ task }) => <span className="demo-owner">{task.owner ? `@${task.owner}` : '—'}</span>,
 }];
+/** A bar template (G7): the task name with its progress, replacing the default label. */
 const BarTemplate = ({ task, placed }: { task: { name: string }; placed: { progress: number } }) =>
   <span className="gx-bar-label demo-bar-tpl">{task.name} · {Math.round(placed.progress * 100)}%</span>;
+/** A tooltip template (G7): the default tooltip plus the task owner. */
 const TooltipTemplate = ({ task, Default }: { task: { owner?: string }; Default: ReactNode }) =>
   <>{Default}<div className="demo-tip-tpl">Owner: {task.owner ?? 'nobody'}</div></>;
 
+/** The demo's samples, chosen with the Sample menu or `?sample=` in the URL. */
 type SampleId = 'proposals' | 'small' | 'large' | 'lanes' | 'lazy' | 'invalid' | 'depth' | 'resources';
 
 // Resources (Phase 9): three people, one part-time on a Mon–Wed calendar, assigned so that Pat is
@@ -89,6 +90,7 @@ const rules = roles as Record<string, AccessRules>;
 const DAY = 86_400_000;
 const USERS: [string, string][] = [['alice', 'Alice (planner)'], ['bob', 'Bob (reviewer)'], ['carol', 'Carol (approver)'], ['dave', 'Dave (progress only)'],
   ['erin', 'Erin (viewer, no crews)'], ['frank', 'Frank (admin)'], ['mallory', 'Mallory (no access)']];
+/** The demo page: a toolbar to pick the sample, theme, language and options, and the Gantt below it. */
 function App() {
   const [sample, setSample] = useState<SampleId>(() => (new URLSearchParams(location.search).get('sample') as SampleId) || 'small');
   // Proposal workflow on a mock backend (M7): one service per separation-of-duties setting, with a clock the demo can move.
@@ -108,7 +110,7 @@ function App() {
   const [lockZoom, setLockZoom] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
   const [failSave, setFailSave] = useState(false);
-  const [lang, setLang] = useState<'en' | 'de'>('en');
+  const [lang, setLang] = useState<'en' | 'de' | 'ar'>(() => (new URLSearchParams(location.search).get('lang') as 'de' | 'ar' | null) ?? 'en');
   const [backlog, setBacklog] = useState(backlogItems);
   const [save, setSave] = useState<{ status: 'saving' | 'saved' | 'error'; reason?: string } | undefined>();
   // Simulated persistence: every data change is "saved" after a short delay, or fails when asked to.
@@ -156,7 +158,7 @@ function App() {
         <label>Details <select value={dock} onChange={(e) => setDock(e.target.value as typeof dock)}>
           <option value="right">Right</option><option value="bottom">Bottom</option></select></label>
         <label>Language <select value={lang} onChange={(e) => setLang(e.target.value as typeof lang)}>
-          <option value="en">English</option><option value="de">Deutsch (partial)</option></select></label>
+          <option value="en">English</option><option value="de">Deutsch</option><option value="ar">العربية (right-to-left layout, English text)</option></select></label>
         <label><input type="checkbox" checked={lockZoom} onChange={(e) => setLockZoom(e.target.checked)} /> Host refuses zoom</label>
         <label><input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} /> Read-only</label>
         <label><input type="checkbox" checked={failSave} onChange={(e) => setFailSave(e.target.checked)} /> Saves fail</label>
@@ -171,7 +173,7 @@ function App() {
       {sample === 'proposals'
         ? <>
           <Gantt key={user + String(sod)} ref={ref} backend={backend} access={rules[user] ?? null} kinds={kinds} theme={theme} detailsPanel={dock} height="calc(100vh - 110px)"
-            userId={user} locale={lang === 'de' ? 'de-DE' : undefined} messages={lang === 'de' ? german : undefined}
+            userId={user} locale={lang === 'de' ? 'de-DE' : lang === 'ar' ? 'ar-EG' : undefined} messages={lang === 'de' ? german : undefined}
             onProposalCreated={(e) => push(`event: proposalCreated ${e.proposal.name}`)}
             onProposalSubmitted={(e) => push(`event: proposalSubmitted by ${e.actor}`)}
             onProposalReviewed={(e) => push(`event: proposalReviewed by ${e.actor}`)}
@@ -197,7 +199,7 @@ function App() {
             backlog={sample === 'resources' ? backlog : undefined} onBacklogUsed={(it) => setBacklog((b) => b.filter((x) => x.id !== it.id))}
             scaleRange={sample === 'depth' ? { start: '2026-10-26' } : undefined}
             columns={withTemplates ? hostColumns : undefined} barTemplate={withTemplates ? BarTemplate : undefined} tooltipTemplate={withTemplates ? TooltipTemplate : undefined}
-            locale={lang === 'de' ? 'de-DE' : undefined} messages={lang === 'de' ? german : undefined}
+            locale={lang === 'de' ? 'de-DE' : lang === 'ar' ? 'ar-EG' : undefined} messages={lang === 'de' ? german : undefined}
             onBeforeOperation={(op) => (lockZoom && op.type === 'zoom.set' ? 'Zoom is locked by the host' : undefined)}
             onOperation={(r, ctx) => push(`✓ ${ctx.source}: ${describe(r.operation)}`)}
             onOperationRefused={(r) => push(`✗ ${describe(r.operation)}: ${r.reason}`)} />

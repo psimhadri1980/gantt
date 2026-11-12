@@ -1,10 +1,15 @@
+/**
+ * @gantt/react: the React Gantt component and everything a host application uses with it.
+ */
 export { Gantt, type GanttRootProps as GanttProps } from './GanttRoot.tsx';
-export { type GanttHandle, type ToolbarProps, type GridColumn, type CellProps, type GanttViewState, type SavedView } from './Gantt.tsx';
+export { type GanttHandle, type ToolbarProps, type GridColumn, type CellProps, type GanttViewState, type SavedView, type ExportFormat } from './Gantt.tsx';
 export type { AccessRules, Permission, Rule } from '@gantt/access';
 export { memoryBackend, httpBackend, type GanttBackend } from '@gantt/service';
 export type { DataOperation, GanttOperation, OperationContext, OperationResult, ViewOperation } from '@gantt/state';
 export type { GanttKinds, KindDefinition, DetailsProps } from './Details.tsx';
 export type { SelectionTarget } from '@gantt/state';
 export { defaultMessages, type GanttMessages } from './i18n.ts';
+export { germanMessages } from './messages.de.ts';
+export { localeDir } from './Gantt.tsx';
 export { ZOOM_LEVELS, HOUR_ZOOM, type ZoomLevel, type ScaleUnit } from '@gantt/state';
 export { scheduleOffThread } from './engineClient.ts';

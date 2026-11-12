@@ -7,6 +7,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { schedule } from '../packages/engine/src/index.ts';
 import { generate } from '../packages/mock/src/generate.ts';
+import { defaultMessages } from '../packages/react/src/i18n.ts';
+import { germanMessages } from '../packages/react/src/messages.de.ts';
 import smallSample from '../packages/mock/src/samples/small.json' with { type: 'json' };
 
 const root = new URL('../apps/demo/', import.meta.url).pathname;
@@ -193,6 +195,30 @@ await test('all visible text follows the messages and locale (German sample)', a
   const details = await page.locator('.gx-details').textContent();
   if (!details.includes('Zeitplan') || !details.includes('Fortschritt')) throw new Error(`details not translated: ${details.slice(0, 120)}`);
   if (!/\d+\.\s?Nov/.test(details) && !/Nov\./.test(details)) throw new Error(`dates not in German format: ${details.slice(0, 160)}`);
+  // No English interface text left: every plain message that differs in German must be absent from the visible text,
+  // the accessible names and the tooltips of the component (task names are data and stay as they are).
+  const english = Object.entries(defaultMessages)
+    .filter(([k, v]) => typeof v === 'string' && v !== germanMessages[k] && v.length > 3 && /[a-z]{4}/i.test(v))
+    .map(([, v]) => v);
+  const shown = await page.locator('.gx-root').first().evaluate((el) => {
+    const out = [el.innerText];
+    for (const n of el.querySelectorAll('[aria-label],[title],[placeholder]')) out.push(n.getAttribute('aria-label') ?? '', n.getAttribute('title') ?? '', n.getAttribute('placeholder') ?? '');
+    return out.join('\n');
+  });
+  const data = new Set(smallSample.tasks.map((t) => t.name));
+  const left = english.filter((v) => shown.split('\n').some((line) => line.trim() === v && !data.has(v)));
+  if (left.length) throw new Error(`English text in the German interface: ${left.join(', ')}`);
+});
+
+await test('right-to-left layout mirrors the table and keeps the timeline left to right (G14)', async (page) => {
+  await page.selectOption('select >> nth=3', 'ar');
+  await page.locator('.gx-root[dir="rtl"]').first().waitFor();
+  const [grid, chart] = await Promise.all([page.locator('.gx-grid').first().boundingBox(), page.locator('.gx-chart').first().boundingBox()]);
+  if (!(grid.x > chart.x)) throw new Error(`table should be right of the chart: grid ${grid.x}, chart ${chart.x}`);
+  const dir = await page.locator('.gx-chart').first().evaluate((el) => getComputedStyle(el).direction);
+  if (dir !== 'ltr') throw new Error(`timeline direction ${dir}`);
+  const days = await page.locator('.gx-tick.gx-major').evaluateAll((els) => els.slice(0, 2).map((e) => e.getBoundingClientRect().x));
+  if (!(days[0] < days[1])) throw new Error('dates should run left to right');
 });
 
 await test('save indicator shows Saving, then Saved or the reason it was not saved (F13)', async (page) => {
@@ -608,7 +634,8 @@ await test('custom scale labels and a fixed start boundary (G2, G3)', async (pag
   await page.evaluate(() => { document.querySelector('.gx-chart').scrollLeft = 0; });
   await page.waitForTimeout(200);
   const first = await page.evaluate(() => [...document.querySelectorAll('.gx-tick.gx-minor')].find((t) => parseFloat(t.style.left) <= 0 && parseFloat(t.style.left) + parseFloat(t.style.width) > 0)?.textContent);
-  expectEq(first, 'W44 · 26 Oct', 'the scale starts at the fixed boundary');
+  // The browser runs in en-US, where weeks start on Sunday (G14): the week holding the Monday 26 Oct boundary begins on the 25th.
+  expectEq(first, 'W44 · 25 Oct', 'the scale starts at the fixed boundary');
 });
 
 // ---------- Phase 8: tracking ----------
@@ -702,6 +729,50 @@ await test('a backlog item dragged onto the chart becomes a task there (D5)', as
   await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).dragTo(page.locator('.gx-chart'), { targetPosition: { x: 300, y: await page.evaluate(() => { const c = document.querySelector('.gx-chart').getBoundingClientRect(); const r = [...document.querySelectorAll('.gx-grid-body [role="row"][data-task="t15"]')][0].getBoundingClientRect(); return r.top - c.top + r.height / 2; }) } });
   await page.waitForFunction(() => window.gantt.current.getData().tasks.some((t) => t.name === 'Load testing' && t.parent === 't15' && t.duration === 3));
   await page.locator('.gx-backlog-item', { hasText: 'Load testing' }).waitFor({ state: 'detached' });
+});
+
+// ---------- Phase 10: interchange and platform ----------
+async function exportFile(page, label) {
+  await page.getByRole('button', { name: 'Export' }).click();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: label }).click()]);
+  const path = await dl.path();
+  return { name: dl.suggestedFilename(), bytes: readFileSync(path) };
+}
+
+await test('export to PNG, PDF, Excel, CSV and Microsoft Project produces valid files (I2, I3, I4)', async (page) => {
+  const png = await exportFile(page, 'Image (PNG)');
+  expectEq(png.bytes.subarray(1, 4).toString(), 'PNG', 'PNG signature');
+  if (png.bytes.length < 5000) throw new Error('PNG suspiciously small');
+  const pdf = await exportFile(page, 'PDF');
+  expectEq(pdf.bytes.subarray(0, 5).toString(), '%PDF-', 'PDF header'); expectEq(pdf.name, 'Platform-migration.pdf', 'file name');
+  if (!pdf.bytes.toString('latin1').includes('/DCTDecode') || !pdf.bytes.toString('latin1').trimEnd().endsWith('%%EOF')) throw new Error('PDF without image or trailer');
+  const xlsx = await exportFile(page, 'Excel workbook');
+  expectEq(xlsx.bytes.subarray(0, 2).toString(), 'PK', 'xlsx is a ZIP');
+  const csv = await exportFile(page, 'CSV');
+  if (!csv.bytes.toString('utf8').includes('Data model')) throw new Error('CSV without tasks');
+  const xml = await exportFile(page, 'Microsoft Project XML');
+  if (!xml.bytes.toString('utf8').includes('<Name>Data model</Name>')) throw new Error('MSPDI without tasks');
+});
+
+await test('import from CSV and Microsoft Project applies as one undoable change (I1, I4)', async (page) => {
+  const csv = (await exportFile(page, 'CSV')).bytes.toString('utf8').replace('Data model', 'Data model (imported)');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'plan.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').name === 'Data model (imported)');
+  await page.locator('.gx-notice', { hasText: 'plan.csv: 1 changes imported' }).waitFor(); // exactly the one real change
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't7').name === 'Data model');
+  const xml = (await exportFile(page, 'Microsoft Project XML')).bytes.toString('utf8').replace('<Name>Pilot</Name>', '<Name>Pilot (from Project)</Name>');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'plan.xml', mimeType: 'application/xml', buffer: Buffer.from(xml) });
+  await page.waitForFunction(() => window.gantt.current.getData().tasks.find((t) => t.id === 't16').name === 'Pilot (from Project)');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from('name,duration\nX,three\n') });
+  await page.locator('.gx-notice', { hasText: /bad.csv could not be imported: row 2.duration/ }).waitFor();
+});
+
+await test('full screen mode (G8)', async (page) => {
+  await page.getByRole('button', { name: 'Full screen' }).click();
+  await page.waitForFunction(() => document.fullscreenElement?.classList.contains('gx-root'));
+  await page.getByRole('button', { name: 'Exit full screen' }).click();
+  await page.waitForFunction(() => !document.fullscreenElement);
 });
 
 // ---------- Phase 2 and 3: access and the Proposal workflow, through the real interface ----------
@@ -933,6 +1004,17 @@ await test('an earlier version is restored only through a new Proposal; the summ
   await page.locator('.gx-details dd', { hasText: /^1$/ }).first().waitFor(); // Open proposals: 1
 });
 
+await test('an import in the Proposal workflow lands in a Proposal, never in Current (I1, K0)', async (page) => {
+  await proposals(page);
+  await page.locator('.gx-bar[data-task="t7"]').waitFor();
+  const csv = (await exportFile(page, 'CSV')).bytes.toString('utf8').replace('Data model', 'Data model v2');
+  await page.locator('input[type="file"][aria-label="Import…"]').setInputFiles({ name: 'plan.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await page.locator('.gx-pbar .gx-state', { hasText: 'Draft' }).waitFor();
+  expectEq(await page.evaluate(() => window.svc.snapshot('erin').current.tasks.find((t) => t.id === 't7').name), 'Data model', 'Current unchanged');
+  const p = await page.evaluate(() => window.svc.snapshot('alice').proposals[0]);
+  expectEq(await page.evaluate((id) => window.svc.proposalDocument('alice', id).tasks.find((t) => t.id === 't7').name, p.id), 'Data model v2', 'the Proposal has it');
+});
+
 await test('accessibility scan of the Proposal workflow (axe, WCAG 2.2 AA)', async (page) => {
   await proposals(page);
   await page.evaluate(() => window.svc.change('alice', null, [{ entity: 'task', op: 'update', id: 't3', fields: { progress: 0.3 } }]));
@@ -985,6 +1067,46 @@ for (const theme of ['Light', 'Dark']) {
     });
     if (v.length) throw new Error(v.join(' | '));
   });
+}
+
+// Server rendering (J2): the example app in apps/ssr renders with react-dom/server; the browser hydrates that HTML.
+// Runs outside test(), which opens the demo; this one opens its own server.
+if (!only || only.test('server rendering')) {
+  const name = 'server-rendered HTML holds the chart and hydrates with no mismatch and no layout jump (J2)';
+  const { start } = await import('../apps/ssr/server.mjs');
+  const stop = await start(5193);
+  try {
+    // 1. Without JavaScript the page already shows rows and bars.
+    const bare = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 1440, height: 900 } });
+    const p0 = await bare.newPage();
+    await p0.goto('http://127.0.0.1:5193/');
+    const where = (p) => p.evaluate(() => ({
+      rows: document.querySelectorAll('.gx-grid [role="row"]').length,
+      bars: [...document.querySelectorAll('.gx-bar')].slice(0, 5).map((b) => [b.offsetLeft, b.offsetTop, b.offsetWidth]),
+      grid: document.querySelector('.gx-grid')?.getBoundingClientRect().width,
+    }));
+    const before = await where(p0);
+    await bare.close();
+    if (before.rows < 5 || before.bars.length < 5) throw new Error(`server HTML is missing the chart: ${JSON.stringify(before)}`);
+    // 2. With JavaScript: hydration reports no mismatch, nothing errors, and the bars stay where the server put them.
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.goto('http://127.0.0.1:5193/');
+    await page.waitForFunction(() => window.hydrated);
+    await page.waitForTimeout(500);
+    const after = await where(page);
+    const mismatch = await page.evaluate(() => window.hydrationErrors);
+    await page.close();
+    if (mismatch.length) throw new Error(`hydration mismatch: ${mismatch.join('; ').slice(0, 300)}`);
+    if (errors.length) throw new Error(`page errors: ${errors.join('; ').slice(0, 300)}`);
+    expectEq(JSON.stringify(after), JSON.stringify(before), 'layout after hydration');
+    results.push(`  PASS  ${name}`);
+  } catch (e) {
+    failures++;
+    results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n').slice(0, 3).join('\n        ')}`);
+  } finally { await stop(); }
 }
 
 await browser.close();

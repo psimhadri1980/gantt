@@ -32,7 +32,7 @@ describe('layout', () => {
   });
 });
 
-import { isoWeek, ticks } from './index.ts';
+import { isoWeek, localeWeekStart, ticks } from './index.ts';
 import { toDay } from '@gantt/engine';
 describe('ISO week numbers', () => {
   it.each([
@@ -45,5 +45,13 @@ describe('ISO week numbers', () => {
     expect(t!.label).toBe('W46 · 9 Nov');
     const [n] = ticks({ origin: d, pxPerDay: 10 }, 'week', d, d + 6, 'en-GB');
     expect(n!.label).toBe('W46 09/11');
+  });
+  it('starts weeks on Sunday when asked, numbered like the following ISO week (G14)', () => {
+    const d = toDay('2026-11-11');
+    const [t] = ticks({ origin: d, pxPerDay: 22 }, 'week', d, d, 'en-US', undefined, 0);
+    expect(t!.day).toBe(toDay('2026-11-08'));
+    expect(t!.label).toMatch(/^W46 /);
+    expect(localeWeekStart('en-US')).toBe(0);
+    expect(localeWeekStart('de-DE')).toBe(1);
   });
 });

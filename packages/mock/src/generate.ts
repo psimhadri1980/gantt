@@ -1,6 +1,11 @@
+/**
+ * Generates large, realistic roadmaps for benchmarks and tests: a tree of summaries, tasks and milestones with
+ * links, owners, kinds and optional lanes. Deterministic for the same options (seeded random numbers).
+ */
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import { fromDay, toDay, WorkCalendar } from '@gantt/engine';
 
+/** Size and shape of a generated roadmap (for benchmarks and tests). */
 export interface GenerateOptions {
   tasks: number;
   /** Maximum nesting depth of summaries (1 = flat). */

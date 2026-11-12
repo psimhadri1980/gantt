@@ -1,0 +1,1 @@
+{"name": "@gantt/interchange", "description": "Import and export: CSV, Excel (.xlsx) and Microsoft Project XML, with no third-party libraries.", "version": "0.1.0", "private": true, "type": "module", "main": "src/index.ts", "types": "src/index.ts", "dependencies": {"@gantt/contract": "*", "@gantt/engine": "*"}}

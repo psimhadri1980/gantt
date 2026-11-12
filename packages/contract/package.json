@@ -1,5 +1,6 @@
 {
   "name": "@gantt/contract",
+  "description": "The roadmap document format shared by every package: TypeScript types, JSON Schema and validation.",
   "version": "0.1.0",
   "private": true,
   "type": "module",

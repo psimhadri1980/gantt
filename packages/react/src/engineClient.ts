@@ -7,8 +7,9 @@ import { expandPlacement, place, schedule, type CompactPlacement, type Placement
  */
 let worker: Worker | null | undefined;
 let seq = 0;
-const pending = new Map<number, { resolve: (p: any) => void; reject: (e: Error) => void }>();
+const pending = new Map<number, { resolve: (p: never) => void; reject: (e: Error) => void }>();
 
+/** The shared engine worker, started on first use; null where workers are unavailable or failed to start. */
 function getWorker(): Worker | null {
   if (worker !== undefined) return worker;
   try {
@@ -17,7 +18,7 @@ function getWorker(): Worker | null {
     worker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; placement?: CompactPlacement; schedule?: unknown; ms?: number; error?: string }>) => {
       const p = pending.get(e.data.id); if (!p) return;
       pending.delete(e.data.id);
-      e.data.ok ? p.resolve(e.data.schedule ? { schedule: e.data.schedule, ms: e.data.ms } : e.data.placement!) : p.reject(new Error(e.data.error));
+      e.data.ok ? p.resolve((e.data.schedule ? { schedule: e.data.schedule, ms: e.data.ms } : e.data.placement!) as never) : p.reject(new Error(e.data.error));
     };
     worker.onerror = (e) => {
       e.preventDefault();
@@ -28,6 +29,10 @@ function getWorker(): Worker | null {
   return worker;
 }
 
+/**
+ * Places a roadmap in the worker and expands the compact result. Falls back to the main thread when there is
+ * no worker or the worker fails, so the result is the same either way.
+ */
 export async function placeOffThread(doc: RoadmapDocument): Promise<Placement> {
   const w = getWorker();
   if (!w) return place(doc);

@@ -1,0 +1,14 @@
+# Weekly pull requests for outdated npm packages and GitHub Actions; security updates arrive as soon as published.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-tools:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

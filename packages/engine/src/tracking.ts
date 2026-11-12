@@ -17,6 +17,7 @@ export function takeBaseline(placement: Placement, meta: Omit<Baseline, 'tasks'>
   return { ...meta, tasks };
 }
 
+/** Where the progress line passes one task: left of the status date when the task is behind, right when ahead. */
 export interface ProgressPoint {
   taskId: string;
   /** Where the line passes on this task's row, as a (fractional) day number. */
@@ -56,6 +57,7 @@ export function progressLine(placement: Placement, statusDay: DayNum, tolerance 
   return out;
 }
 
+/** Planned versus actual cumulative work over time, for the S-curve chart. */
 export interface SCurve {
   /** One entry per calendar day from the first start to the last finish. */
   days: DayNum[];

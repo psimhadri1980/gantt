@@ -22,13 +22,19 @@ export const ZOOM_LEVELS: ZoomLevel[] = [
 /** An hour level for hour-based plans (G4); add it to `zoomLevels` when needed. */
 export const HOUR_ZOOM: ZoomLevel = { id: 'hour', label: 'Hours', pxPerDay: 24 * 32, major: 'day', minor: 'hour' };
 
+/** The time scale of the chart: the day at x = 0 and the zoom, in pixels per day. */
 export interface Scale { origin: DayNum; pxPerDay: number }
+/** The x position (in pixels) of the start of a day. */
 export const xOf = (s: Scale, d: DayNum) => (d - s.origin) * s.pxPerDay;
+/** The day at an x position. */
 export const dayAt = (s: Scale, x: number) => Math.floor(x / s.pxPerDay) + s.origin;
 
+/** One label on the time scale: the day it starts, its position and width in pixels, and its text. */
 export interface Tick { day: DayNum; x: number; w: number; label: string }
 
+/** The year, month and day of a day number. */
 const ymd = (d: DayNum) => { const s = fromDay(d); return { y: +s.slice(0, 4), m: +s.slice(5, 7), d: +s.slice(8, 10) }; };
+/** The day number of a calendar date (month 1–12). */
 const dayOf = (y: number, m: number, d = 1) => Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
 
 /**
@@ -41,8 +47,24 @@ export function isoWeek(d: DayNum): number {
   return Math.floor((thursday - jan1) / 7) + 1;
 }
 
-/** Ticks of one unit covering [from, to], labelled via Intl in the given locale. */
-export function ticks(s: Scale, unit: ScaleUnit, from: DayNum, to: DayNum, locale?: string, format?: (day: number, locale?: string) => string): Tick[] {
+/**
+ * First day of the week for a locale (G14): 0 = Sunday, 1 = Monday … 6 = Saturday. Uses `Intl.Locale#getWeekInfo`
+ * (or the older `weekInfo` property) where the runtime has it, and falls back to Monday (ISO 8601).
+ */
+export function localeWeekStart(locale?: string): number {
+  try {
+    const l = new Intl.Locale(locale ?? Intl.DateTimeFormat().resolvedOptions().locale) as Intl.Locale & { getWeekInfo?: () => { firstDay: number }; weekInfo?: { firstDay: number } };
+    const first = l.getWeekInfo?.().firstDay ?? l.weekInfo?.firstDay;
+    return first === undefined ? 1 : first % 7; // Intl uses 1 = Monday … 7 = Sunday
+  } catch { return 1; }
+}
+
+/**
+ * Ticks of one unit covering [from, to], labelled via Intl in the given locale.
+ * Week ticks begin on `weekStart` (0 = Sunday … 6 = Saturday; default Monday). The week number shown is the
+ * ISO week of the Monday inside that week, so a Sunday-start week is numbered like the ISO week that follows it.
+ */
+export function ticks(s: Scale, unit: ScaleUnit, from: DayNum, to: DayNum, locale?: string, format?: (day: number, locale?: string) => string, weekStart = 1): Tick[] {
   const out: Tick[] = [];
   const fmt = (o: Intl.DateTimeFormatOptions) => dateFormat(locale, o);
   const numDM = fmt({ day: 'numeric', month: 'numeric' }), mon = fmt({ month: 'short' }), monY = fmt({ month: 'short', year: 'numeric' }), dayF = fmt({ day: 'numeric' }), wd = fmt({ weekday: 'narrow' });
@@ -55,14 +77,17 @@ export function ticks(s: Scale, unit: ScaleUnit, from: DayNum, to: DayNum, local
       label = (d) => { const a = ymd(d); return `Q${Math.floor((a.m - 1) / 3) + 1} ${a.y}`; }; break; }
     case 'month': cur = dayOf(y, m); next = (d) => { const a = ymd(d); return a.m === 12 ? dayOf(a.y + 1, 1) : dayOf(a.y, a.m + 1); };
       label = (d) => (s.pxPerDay * 30 > 150 ? monY : mon).format(new Date(d * 86_400_000)); break;
-    case 'week': cur = from - ((((from + 3) % 7) + 7) % 7); next = (d) => d + 7;
-      // ISO week number with the week's start date (Monday): "W46 · 9 Nov". Narrow weeks show the short form "W46 9/11".
+    case 'week': {
+      // Day 0 (1970-01-01) was a Thursday, so (d + 4) % 7 is the weekday with Sunday = 0.
+      const ws = ((weekStart % 7) + 7) % 7, toMonday = (8 - ws) % 7;
+      cur = Math.floor(from) - ((((Math.floor(from) + 4 - ws) % 7) + 7) % 7); next = (d) => d + 7;
+      // Week number with the week's start date: "W46 · 9 Nov". Narrow weeks show the short form "W46 9/11".
       label = (d) => {
-        const w = s.pxPerDay * 7, date = new Date(d * 86_400_000);
-        if (w >= 90) return `W${isoWeek(d)} · ${dayF.format(date)} ${mon.format(date)}`;
-        if (w >= 50) return `W${isoWeek(d)} ${numDM.format(date)}`;
-        return w >= 28 ? `W${isoWeek(d)}` : '';
-      }; break;
+        const w = s.pxPerDay * 7, date = new Date(d * 86_400_000), n = isoWeek(d + toMonday);
+        if (w >= 90) return `W${n} · ${dayF.format(date)} ${mon.format(date)}`;
+        if (w >= 50) return `W${n} ${numDM.format(date)}`;
+        return w >= 28 ? `W${n}` : '';
+      }; break; }
     case 'hour': cur = Math.floor(from); next = (d) => Math.round((d + 1 / 24) * 24) / 24;
       label = (d) => String(Math.round((d - Math.floor(d)) * 24)).padStart(2, '0'); break;
     default: cur = Math.floor(from); next = (d) => d + 1;

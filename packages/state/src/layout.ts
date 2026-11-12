@@ -1,3 +1,7 @@
+/**
+ * Row layout and the model the view draws from: which rows are visible (collapsed subtrees, lanes), their
+ * heights and positions, and the indexes built once per document version.
+ */
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import { place, type DayNum, type Placement, type PlacedTask } from '@gantt/engine';
 
@@ -17,6 +21,7 @@ export interface BarLayout {
   track: number;
 }
 
+/** One visible row: which task, how deep in the tree, its top and height in pixels, and whether it is a lane. */
 export interface RowLayout {
   taskId: string;
   depth: number;
@@ -32,6 +37,10 @@ export interface RowLayout {
   tracks: number;
 }
 
+/**
+ * Everything the view needs to draw a roadmap: the document, its placement, the tree (parents, children,
+ * WBS codes) and indexes by id. Built once per document version by `buildModel`.
+ */
 export interface Model {
   doc: RoadmapDocument;
   placement: Placement;
@@ -123,6 +132,7 @@ export function rowAt(rows: RowLayout[], y: number): number {
   return ans;
 }
 
+/** Total height in pixels of the given rows (the bottom of the last one). */
 export function totalHeight(rows: RowLayout[]): number {
   const last = rows[rows.length - 1];
   return last ? last.top + last.height : 0;

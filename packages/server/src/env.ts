@@ -1,6 +1,11 @@
 /** Environment configuration (plan section 4). The safe direction wins for every variable. */
 export interface ServerEnv { mockData: boolean; separationOfDuties: boolean; environment: string; port: number }
 
+/**
+ * Reads the server's settings from environment variables (GANTT_ENVIRONMENT or NODE_ENV, GANTT_ENABLE_MOCK_DATA,
+ * GANTT_ENFORCE_SEPARATION_OF_DUTIES, PORT). Refuses to start in production with separation of duties turned off;
+ * ignores mock data in production; and returns a warning for every relaxed setting so the log shows it.
+ */
 export function readEnv(env: Record<string, string | undefined>): { ok: true; env: ServerEnv; warnings: string[] } | { ok: false; error: string } {
   const environment = (env.GANTT_ENVIRONMENT ?? env.NODE_ENV ?? '').trim().toLowerCase();
   const production = environment === 'production' || environment === 'prod';

@@ -1,7 +1,12 @@
+/**
+ * The core Gantt component and its view. `CoreGantt` owns the working document and the operation pipeline;
+ * `GanttView` draws the toolbar, grid, timeline, links and details panel and handles every interaction.
+ * The public `<Gantt>` (GanttRoot.tsx) wraps it with access resolution and the Proposal workflow.
+ */
 import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel, type ScaleUnit,
+  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, localeWeekStart, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel, type ScaleUnit,
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
   copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
@@ -14,14 +19,20 @@ import { DragController, type DragKind } from './drag.ts';
 import { ContextMenu, type MenuItem } from './menu.tsx';
 import type { ScheduleResult } from '@gantt/engine';
 import { DetailsPanel, type GanttKinds } from './Details.tsx';
-import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
+import { I18nContext, localizeReason, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
 import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBlock, GridHeader, PlaceholderRow, resolveColumns, type CellProps, type GridColumn } from './grid.tsx';
 import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
 import type { PlacedTask } from '@gantt/engine';
 import { ProgressLineLayer, SCurveChart } from './tracking.tsx';
+import { canvasBlob, download, importOperations, pdfFromJpeg, renderChartImage } from './exporters.ts';
+import { fromCsv, fromMsProject, fromXlsx, MSPDI_FIELDS, TABLE_FIELDS, toCsv, toMsProject, toXlsx } from '@gantt/interchange';
 import { Backlog, LoadPanel, type BacklogItem } from './resources.tsx';
 import './gantt.css';
 
+/**
+ * Props of the core Gantt component: the roadmap, how it is shown (zoom, theme, locale, panels, columns,
+ * templates), what may be changed (read-only, access evaluator, interception), and callbacks for every change.
+ */
 export interface GanttProps {
   data: RoadmapDocument;
   zoom?: string;
@@ -32,6 +43,18 @@ export interface GanttProps {
   kinds?: GanttKinds;
   theme?: 'light' | 'dark';
   locale?: string;
+  /**
+   * Text direction (G14). Defaults from `locale`: Arabic, Hebrew, Persian and Urdu are right-to-left. In right-to-left
+   * the table, toolbar and details panel are mirrored; the timeline itself still runs left to right (earlier dates left).
+   */
+  dir?: 'ltr' | 'rtl';
+  /**
+   * Server rendering (J2): place the first document synchronously during render, so the HTML from
+   * `renderToString` (or a framework such as Next.js) already holds the chart and hydration matches it.
+   */
+  ssr?: boolean;
+  /** First day of the week for week ticks: 0 = Sunday … 6 = Saturday. Defaults from `locale` (Monday if unknown). */
+  weekStart?: number;
   /** Vertical markers (F7) in addition to today. */
   markers?: { date: string; label: string }[];
   /** "Today" for the marker; defaults to the roadmap's status date, then the real date. */
@@ -96,6 +119,8 @@ export interface GanttProps {
   tooltipTemplate?: ComponentType<{ task: Task; placed: PlacedTask; Default: ReactNode }>;
   /** Compact mode for small screens (F5): `'auto'` (default) switches it on below 720 px. */
   compact?: boolean | 'auto';
+  /** Called before a file is saved (I2–I4); return false to handle the file yourself instead of the download. */
+  onExport?: (e: { format: ExportFormat; blob: Blob; filename: string }) => boolean | void;
   /** Unplanned work to drag onto the chart (D5); `onBacklogUsed` tells the host which item became which task. */
   backlog?: BacklogItem[];
   onBacklogUsed?: (item: BacklogItem, taskId: string) => void;
@@ -103,6 +128,8 @@ export interface GanttProps {
   scaleRange?: { start?: string; end?: string };
 }
 export type { GridColumn, CellProps, GanttViewState, SavedView };
+/** The file formats the Export menu offers. */
+export type ExportFormat = 'png' | 'pdf' | 'xlsx' | 'csv' | 'mspdi';
 
 /** Imperative handle (H3): `const ref = useRef<GanttHandle>(null); <Gantt ref={ref} … />`. */
 export interface GanttHandle {
@@ -117,6 +144,9 @@ export interface GanttHandle {
   redo: () => Promise<void>;
 }
 
+/**
+ * How the pipeline reaches the mounted view to apply view operations (zoom, scroll, selection) and read its state.
+ */
 interface ViewBridge {
   apply: (op: ViewOperation) => void;
   getSelection: () => SelectionTarget[];
@@ -125,6 +155,7 @@ interface ViewBridge {
   fit: () => void;
 }
 
+/** What a custom toolbar receives: the zoom and its setter, Today and Fit, critical path and schedule controls. */
 export interface ToolbarProps {
   zoom: string; levels: ZoomLevel[]; setZoom: (z: string) => void; scrollToToday: () => void; fit: () => void;
   /** Critical path highlighting (C2). */
@@ -143,7 +174,9 @@ const DAY_CHUNK = 64;
 const OVERSCAN_PX = 400;
 const GRID_MIN = 160;
 
+/** A run of consecutive rows rendered together (the unit of virtual scrolling). */
 export interface Block { index: number; start: number; rows: RowLayout[] }
+/** The actions rows, bars and links call on the view: selection, expansion, focus and the context menu. */
 export interface Api {
   /** `rangeTo`: select every row from the anchor to this row index (Shift+click, D14). */
   select: (t: SelectionTarget, additive: boolean, rangeTo?: number) => void;
@@ -157,7 +190,12 @@ export interface Api {
   finishEdit: (id: string, value: string | null) => void;
   menu: (x: number, y: number, t: SelectionTarget) => void;
 }
+/** Comparison mode: the placement of the version compared against and which tasks were added or changed. */
 interface Compare { base: Placement; diff: Map<string, 'added' | 'changed'> }
+/**
+ * Everything a row, bar or link needs to draw itself, shared through one object so memoized blocks re-render
+ * only when something they show changes.
+ */
 export interface Ctx {
   cols: GridColumn[]; frozen: number;
   /** Tasks matching the filter; their ancestors are shown for context (D10). */
@@ -223,6 +261,11 @@ export function pinMovedStarts(doc: RoadmapDocument, op: DataOperation): DataOpe
   return { ...op, fields: { ...op.fields, constraint: { type: 'SNET', date: op.fields.start } } };
 }
 
+/**
+ * The operations that apply the schedule (K1: "Schedule" in the toolbar): each task's computed start, with a
+ * stored end dropped so the duration rules. Refused when there is a cycle, or when it would move a task the user
+ * may not change and they may not run the schedule for everyone.
+ */
 export function rescheduleOps(doc: RoadmapDocument, ev?: AccessEvaluator): { ops: DataOperation[] } | { error: string } {
   const s = schedule(doc);
   if (s.cycle) return { error: s.issues[0]!.message };
@@ -244,6 +287,7 @@ export function rescheduleOps(doc: RoadmapDocument, ev?: AccessEvaluator): { ops
 export type ChangeOf = { entity: 'task' | 'link'; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> };
 /** The changes an operation makes, flattened. */
 export function changesOf(op: DataOperation): ChangeOf[] { return flattenOps(op).map(changeOf); }
+/** One single data operation as a change for the access rules (a batch must go through `changesOf`). */
 export function changeOf(op: DataOperation): ChangeOf {
   switch (op.type) {
     case 'batch': throw new Error('use changesOf for a batch');
@@ -256,6 +300,10 @@ export function changeOf(op: DataOperation): ChangeOf {
   }
 }
 
+/**
+ * The Gantt without access resolution: owns the working document and the operation pipeline (permissions,
+ * interception, undo and redo), places the document in the worker and renders the view once it is placed.
+ */
 export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(props, ref) {
   // The working document: starts as props.data, changes through data operations, resets when props.data changes.
   const [working, setWorking] = useState<{ from: RoadmapDocument; doc: RoadmapDocument }>({ from: props.data, doc: props.data });
@@ -314,7 +362,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
       return { inverse };
     },
     (op) => { if (!viewRef.current) throw new Error('the chart is still loading'); viewRef.current.apply(op); },
-  ), []);
+  ), []); // eslint-disable-line react-hooks/exhaustive-deps -- one pipeline per Gantt; recordHistory reads only refs and a state setter
   const run = useCallback((op: GanttOperation, source: OperationContext['source'] = 'api') =>
     pipeline.run(op, { source, by: propsRef.current.userId }), [pipeline]);
 
@@ -323,6 +371,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
   const redoStack = useRef<DataOperation[][]>([]);
   const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
   const syncHistory = () => setHistorySize({ undo: undoStack.current.length, redo: redoStack.current.length });
+  /** Records an accepted operation's inverse for undo (or, while undoing, for redo); a new change clears redo. */
   function recordHistory(r: { operation: GanttOperation; inverse?: DataOperation[] }, ctx: OperationContext) {
     if (!r.inverse?.length || !isDataOperation(r.operation)) return;
     if (ctx.source === 'undo') redoStack.current.push(r.inverse);
@@ -376,7 +425,9 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
     }).catch((e: unknown) => mark(e instanceof Error ? e.message : String(e)))
       .finally(() => loadingRef.current.delete(id));
   }, []);
-  const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(null);
+  // With `ssr` the first placement runs synchronously, so the server's HTML and the browser's first render
+  // (hydration) show the same bars instead of a loading state. Later changes go to the worker as usual.
+  const [built, setBuilt] = useState<{ data: RoadmapDocument; model: Model } | null>(() => (props.ssr ? { data: doc, model: buildModel(doc, place(doc)) } : null));
   /** The working document as it is now; the rendered one may lag while the engine places a change. */
   const latestDoc = useCallback(() => docRef.current, []);
   const [failure, setFailure] = useState<{ doc: RoadmapDocument; message: string } | null>(null);
@@ -396,7 +447,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
     }, fail);
     return () => { cancelled = true; };
   }, [doc, built, failure, attempt]);
-  const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
+  const themeAttr = { ...(props.theme ? { 'data-theme': props.theme } : {}), dir: props.dir ?? localeDir(props.locale) };
   if (failure?.doc === doc) return <ErrorState {...props} message={failure.message} retry={retry} themeAttr={themeAttr} />;
   // While a changed document is being placed, keep showing the previous one (no loading flash).
   if (!built) {
@@ -409,6 +460,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
   );
 });
 
+/** Shown when the roadmap cannot be placed or the view fails: the message and a retry button. */
 function ErrorState(props: GanttProps & { message: string; retry: () => void; themeAttr: object }) {
   const m = mergeMessages(props.messages);
   return (
@@ -426,17 +478,24 @@ function ErrorState(props: GanttProps & { message: string; retry: () => void; th
 
 /** Catches a rendering failure so the host page survives and the user sees the error state with a retry. */
 class ViewBoundary extends Component<{ fallback: (message: string) => ReactNode; children: ReactNode }, { message: string | null }> {
-  state = { message: null as string | null };
+  override state = { message: null as string | null };
+  /** Turns a render error into state, so the fallback shows instead of the component unmounting. */
   static getDerivedStateFromError(e: unknown) { return { message: e instanceof Error ? e.message : String(e) }; }
-  render() { return this.state.message !== null ? this.props.fallback(this.state.message) : this.props.children; }
+  /** Renders the fallback once an error was caught, the children otherwise. */
+  override render() { return this.state.message !== null ? this.props.fallback(this.state.message) : this.props.children; }
 }
 
+/** "Saving…", "Saved" or why the last change was not saved (F13), as reported by the host. */
 function SaveIndicator({ state }: { state: NonNullable<GanttProps['saveState']> }) {
   const { t: m } = useI18n();
   const text = state.status === 'saving' ? m.saving : state.status === 'saved' ? m.saved : m.notSaved(state.reason ?? '');
   return <span className={`gx-save gx-save-${state.status}`} role="status">{text}</span>;
 }
 
+/**
+ * The chart itself: toolbar, grid, timeline, links, details panel and dialogs for one placed roadmap. Handles
+ * scrolling and virtualization, zoom, selection, keyboard navigation, editing, drag and drop, and export.
+ */
 function GanttView(props: CoreProps & {
   model: Model; latestDoc: () => RoadmapDocument; run: (op: GanttOperation, source?: OperationContext['source']) => Promise<OperationResult>; viewRef: React.RefObject<ViewBridge | null>;
   loadState: ReadonlyMap<string, string>; requestChildren: (id: string) => void;
@@ -445,6 +504,7 @@ function GanttView(props: CoreProps & {
   const { data, kinds, locale, detailsPanel = 'right', height = 600, run } = props;
   const baseModel = props.model;
   const i18n = useMemo(() => makeI18n(mergeMessages(props.messages), locale), [props.messages, locale]);
+  const weekStart = useMemo(() => props.weekStart ?? localeWeekStart(locale), [props.weekStart, locale]);
   const m = i18n.t;
   // The view (D9–D11, D18, F12): controlled by the host when it passes `view`.
   const [vsState, setVsState] = useState<GanttViewState>(() => props.view ?? {});
@@ -779,7 +839,7 @@ function GanttView(props: CoreProps & {
     return out;
   }, [critical, analysis]);
   const scheduleWhyNot = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : i18n.t.readOnly)
-    : props.evaluator && !props.evaluator.can('schedule.run', { project: data.roadmap.id }) ? 'Missing permission: schedule.run' : null;
+    : props.evaluator && !props.evaluator.can('schedule.run', { project: data.roadmap.id }) ? m.missingPermission('schedule.run') : null;
   const [scheduleNote, setScheduleNote] = useState('');
   const runSchedule = useCallback(() => {
     const r = rescheduleOps(data, props.evaluator);
@@ -802,12 +862,12 @@ function GanttView(props: CoreProps & {
     const ev = props.evaluator;
     if (!ev) return null;
     const d = checkChange(ev, { entity: 'task', op: 'update', id: taskId, fields: { [field]: null } }, t as never, data.roadmap.id);
-    return d.allowed ? null : d.reason!;
+    return d.allowed ? null : localizeReason(i18n.t, d.reason!);
   }, [props.readOnly, props.evaluator, model, data.roadmap.id, i18n, fieldLabel, vs.groupBy]);
   const editTask = useCallback((taskId: string, fields: Partial<Task>) => run({ type: 'task.update', id: taskId, fields }, 'user'), [run]);
   const whyNotLinkEdit = useCallback(() => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
-    return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? 'Missing permission: link.modify' : null;
+    return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? i18n.t.missingPermission('link.modify') : null;
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   const editLink = useCallback((id: string, fields: Partial<Link>) => run({ type: 'link.update', id, fields }, 'user').then((r) => { if (!r.ok) setAnnounce(r.reason); }), [run]);
   const editMany = useCallback((ids: string[], fields: Partial<Task>) => run({ type: 'batch', label: 'bulk', ops: ids.map((id) => ({ type: 'task.update' as const, id, fields })) }, 'user')
@@ -816,7 +876,7 @@ function GanttView(props: CoreProps & {
 
   // ---------- Editing on the chart (Phase 5) ----------
   const [notice, setNotice] = useState('');
-  const say = useCallback((text: string) => { setNotice(text); setAnnounce(text); }, []);
+  const say = useCallback((text: string) => { const t = localizeReason(i18nRef.current.t, text) ?? text; setNotice(t); setAnnounce(t); }, []);
   const commit = useCallback((op: DataOperation) => { void run(op, 'user').then((r) => { if (!r.ok) say(r.reason); }); }, [run, say]);
   const dataRef = useRef(data); dataRef.current = data;
   const modelRef = useRef(model); modelRef.current = model;
@@ -824,7 +884,7 @@ function GanttView(props: CoreProps & {
   const whyNotLinkFor = useCallback((src: string, tgt: string, type: Link['type']) => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
     const ev = props.evaluator;
-    if (ev && !ev.can('link.create', { project: data.roadmap.id })) return 'Missing permission: link.create';
+    if (ev && !ev.can('link.create', { project: data.roadmap.id })) return i18n.t.missingPermission('link.create');
     return whyNotLink(dataRef.current, src, tgt, type);
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   /** Tasks the keyboard edits act on: the selection, else the focused row. */
@@ -1098,8 +1158,8 @@ function GanttView(props: CoreProps & {
     if (t.type === 'link') {
       const l = data.links.find((x) => x.id === t.linkId); if (!l) return [];
       const why = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly)
-        : props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? 'Missing permission: link.modify' : null;
-      const whyDel = props.readOnly ? why : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? 'Missing permission: link.delete' : null;
+        : props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? m.missingPermission('link.modify') : null;
+      const whyDel = props.readOnly ? why : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? m.missingPermission('link.delete') : null;
       return [
         ...(['FS', 'SS', 'FF', 'SF'] as const).map((ty) => ({ label: m.linkType[ty], checked: l.type === ty, why, run: () => commit({ type: 'link.update', id: l.id, fields: { type: ty } }) })),
         { separator: true, label: '' },
@@ -1130,7 +1190,7 @@ function GanttView(props: CoreProps & {
       { label: m.undo, shortcut: 'Ctrl+Z', why: props.history.canUndo ? null : m.nothingToUndo, run: () => void props.history.undo() },
       { label: m.redo, shortcut: 'Ctrl+Y', why: props.history.canRedo ? null : m.nothingToRedo, run: () => void props.history.redo() },
       { separator: true, label: '' },
-      { label: m.deleteTask, shortcut: 'Del', why: props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('task.delete', { project: data.roadmap.id }) ? 'Missing permission: task.delete' : null, run: () => commit({ type: 'task.delete', id }) },
+      { label: m.deleteTask, shortcut: 'Del', why: props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('task.delete', { project: data.roadmap.id }) ? m.missingPermission('task.delete') : null, run: () => commit({ type: 'task.delete', id }) },
     ];
   };
 
@@ -1198,7 +1258,7 @@ function GanttView(props: CoreProps & {
   };
   const whyNotCreate = (parent: string) => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : m.readOnly;
-    return props.evaluator && !props.evaluator.can('task.create', { project: data.roadmap.id }) ? 'Missing permission: task.create' : null;
+    return props.evaluator && !props.evaluator.can('task.create', { project: data.roadmap.id }) ? m.missingPermission('task.create') : null;
     void parent;
   };
 
@@ -1257,7 +1317,8 @@ function GanttView(props: CoreProps & {
   const [gridHidden, setGridHidden] = useState(false);
   const startSplit = (e: React.PointerEvent) => {
     const x0 = e.clientX, w0 = gridW;
-    const mv = (ev: PointerEvent) => setGridW(Math.max(GRID_MIN, Math.min(900, w0 + ev.clientX - x0)));
+    const sign = rootRef.current?.dir === 'rtl' ? -1 : 1; // in right-to-left the table grows when dragging left
+    const mv = (ev: PointerEvent) => setGridW(Math.max(GRID_MIN, Math.min(900, w0 + sign * (ev.clientX - x0))));
     const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
   };
@@ -1273,10 +1334,60 @@ function GanttView(props: CoreProps & {
   /** Why a fix may not be applied: read-only, or a field the user may not change (C5, F14). */
   const whyNotFix = (f: IssueFix): string | null => {
     for (const op of f.ops) {
-      if (op.type === 'link.delete') { const w = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? 'Missing permission: link.delete' : null; if (w) return w; }
+      if (op.type === 'link.delete') { const w = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? m.missingPermission('link.delete') : null; if (w) return w; }
       else for (const f2 of Object.keys(op.fields)) { const w = whyNotEdit(op.id, f2); if (w) return w; }
     }
     return null;
+  };
+  // ---------- Interchange (I1–I4) and full screen (G8) ----------
+  const [exportAt, setExportAt] = useState<{ x: number; y: number } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportAs = async (format: ExportFormat) => {
+    try {
+      const doc = props.latestDoc();
+      const stem = (doc.roadmap.name || 'roadmap').replace(/[^\w.-]+/g, '-');
+      let blob: Blob;
+      if (format === 'csv') blob = new Blob([toCsv(doc)], { type: 'text/csv;charset=utf-8' });
+      else if (format === 'xlsx') blob = new Blob([toXlsx(doc) as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      else if (format === 'mspdi') blob = new Blob([toMsProject(doc)], { type: 'application/xml' });
+      else {
+        // The image follows the theme: colours come from the component's CSS variables.
+        const cs = getComputedStyle(rootRef.current!);
+        const v = (n: string, d: string) => cs.getPropertyValue(n).trim() || d;
+        const canvas = renderChartImage({
+          rows, model, level, locale, title: doc.roadmap.name, today: todayDay,
+          colors: { bg: v('--gx-bg', '#fff'), text: v('--gx-text', '#111'), muted: v('--gx-muted', '#666'), grid: v('--gx-grid', '#eee'), bar: v('--gx-task', '#3b6fd8'), summary: v('--gx-text', '#333'), milestone: v('--gx-critical', '#b42318'), link: v('--gx-muted', '#888'), today: v('--gx-critical', '#c00') },
+        });
+        if (format === 'png') blob = await canvasBlob(canvas, 'image/png');
+        else blob = pdfFromJpeg(new Uint8Array(await (await canvasBlob(canvas, 'image/jpeg', 0.92)).arrayBuffer()), canvas.width, canvas.height, doc.roadmap.name);
+      }
+      const filename = `${stem}.${format === 'mspdi' ? 'xml' : format}`;
+      if (props.onExport?.({ format, blob, filename }) !== false) download(blob, filename);
+    } catch (e) { say(m.exportFailed((e as Error).message)); }
+  };
+  const importFile = async (file: File) => {
+    const doc = props.latestDoc();
+    const base = { contract: doc.contract, roadmap: doc.roadmap, calendars: doc.calendars, resources: doc.resources };
+    const name = file.name.toLowerCase();
+    const r = name.endsWith('.csv') || name.endsWith('.txt') ? fromCsv(await file.text(), base)
+      : name.endsWith('.xlsx') ? await fromXlsx(new Uint8Array(await file.arrayBuffer()), base)
+      : name.endsWith('.xml') ? fromMsProject(await file.text(), base)
+      : { ok: false as const, errors: [{ path: 'file', message: m.importHint }] };
+    if (!r.ok) { say(m.importFailed(file.name, r.errors.slice(0, 3).map((x) => `${x.path}: ${x.message}`).join('; '))); return; }
+    // The import is one change through the usual pipeline: permissions, validation, undo, and in the
+    // Proposal workflow it lands in a Proposal (I1: imports never change Current directly).
+    const ops = importOperations(doc, { ...r.doc, roadmap: doc.roadmap }, name.endsWith('.xml') ? MSPDI_FIELDS : TABLE_FIELDS);
+    if (!ops.length) { say(m.importNothing); return; }
+    void run({ type: 'batch', label: `import ${file.name}`, ops }, 'user').then((x) => say(x.ok ? m.imported(file.name, i18n.num(ops.length)) : m.importFailed(file.name, x.reason)));
+  };
+  const [isFull, setIsFull] = useState(false);
+  useEffect(() => {
+    const on = () => setIsFull(document.fullscreenElement === rootRef.current);
+    document.addEventListener('fullscreenchange', on); return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void rootRef.current?.requestFullscreen?.().catch((e: Error) => say(e.message));
   };
   // ---------- View tools (D9–D11, D18, D19, F12) ----------
   const [findOpen, setFindOpen] = useState(false);
@@ -1347,7 +1458,7 @@ function GanttView(props: CoreProps & {
   const gridOff = compact ? !gridOnCompact : gridHidden;
 
   const Toolbar = props.toolbar === false ? null : props.toolbar ?? DefaultToolbar;
-  const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
+  const themeAttr = { ...(props.theme ? { 'data-theme': props.theme } : {}), dir: props.dir ?? localeDir(props.locale) };
   const visibleBlocks = blocks.slice(view.b0, view.b1);
   // The chart side (bars, links, ticks) shows only the on-screen part while settling after a zoom.
   const chartBlocks = settling ? blocks.slice(view.v0, view.v1) : visibleBlocks;
@@ -1403,6 +1514,11 @@ function GanttView(props: CoreProps & {
         <div className="gx-toolbar-row">
           <Toolbar zoom={zoom} levels={levels} setZoom={(z) => setZoom(z)} scrollToToday={scrollToToday} fit={fit}
             critical={showCritical} setCritical={setShowCritical} runSchedule={runSchedule} scheduleWhyNot={scheduleWhyNot} />
+          <button className="gx-btn" aria-haspopup="menu" aria-expanded={!!exportAt} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setExportAt({ x: r.left, y: r.bottom + 4 }); }}>{m.exportLabel}</button>
+          <button className="gx-btn" title={m.importHint} onClick={() => fileRef.current?.click()}>{m.importLabel}</button>
+          <input ref={fileRef} type="file" hidden accept=".csv,.txt,.xlsx,.xml" aria-label={m.importLabel}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+          <button className="gx-btn" aria-pressed={isFull} onClick={toggleFullscreen}>{isFull ? m.exitFullscreen : m.fullscreen}</button>
           <button className="gx-btn" aria-pressed={showSlack} onClick={() => setShowSlack((v) => !v)}>{m.slackShow}</button>
           {baselines.length > 0 && <label className="gx-inline-label">{m.baselineLabel}{' '}
             <select className="gx-select" value={baselineId} onChange={(e) => setBaselineId(e.target.value)}>
@@ -1480,14 +1596,14 @@ function GanttView(props: CoreProps & {
               <div className="gx-splitter" role="separator" aria-orientation="vertical" aria-label={m.resizeGrid} tabIndex={0}
                 aria-valuenow={gridW} aria-valuemin={GRID_MIN} aria-valuemax={900}
                 onPointerDown={startSplit}
-                onKeyDown={(e) => { if (e.key === 'ArrowLeft') setGridW((w) => Math.max(GRID_MIN, w - 20)); if (e.key === 'ArrowRight') setGridW((w) => Math.min(900, w + 20)); }} />
+                onKeyDown={(e) => { const grow = (e.key === 'ArrowRight') !== (rootRef.current?.dir === 'rtl'); if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') setGridW((w) => Math.max(GRID_MIN, Math.min(900, w + (grow ? 20 : -20)))); }} />
             </div>
           )}
 
           <div className="gx-chart-wrap">
             <div className="gx-scale" ref={headerRef} aria-hidden>
               <div ref={headerInnerRef} style={{ width: chartWidth, position: 'relative', height: '100%' }}>
-                <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} format={level.format} />
+                <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} format={level.format} weekStart={weekStart} />
               </div>
             </div>
             <div className="gx-chart" ref={chartRef} onScroll={onScroll} tabIndex={0} role="region" aria-label={m.timeline}
@@ -1551,6 +1667,8 @@ function GanttView(props: CoreProps & {
       {load && <LoadPanel load={load} scale={scale} labelWidth={chartBox.left} innerRef={loadInnerRef} chartWidth={chartWidth} chartVisible={chartBox.width} />}
       <Tooltip setterRef={tipRef} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} label={m.menu} onClose={() => setMenu(null)} />}
+      {exportAt && <ContextMenu x={exportAt.x} y={exportAt.y} label={m.exportLabel} onClose={() => setExportAt(null)}
+        items={(['png', 'pdf', 'xlsx', 'csv', 'mspdi'] as const).map((f) => ({ label: m.exportAs[f], run: () => void exportAs(f) }))} />}
       {colMenu && <ContextMenu x={colMenu.x} y={colMenu.y} items={colMenuItems(colMenu.col)} label={m.columnMenu(colMenu.col.label)} onClose={() => setColMenu(null)} />}
       {problemsAt && <Popover x={problemsAt.x} y={problemsAt.y} label={m.problemsTitle} onClose={() => setProblemsAt(null)}>
         <ProblemList doc={data} issues={analysis?.issues ?? []} why={whyNotFix} onFix={(f) => { commit({ type: 'batch', label: 'fix', ops: f.ops as DataOperation[] }); say(f.label); }}
@@ -1578,6 +1696,7 @@ const RowBgBlock = memo(function RowBgBlock({ block, selKeys }: { block: Block; 
   })}</>;
 });
 
+/** One block of bars: each task's bar (or bars), progress, labels, baseline, slack and drag handles. */
 const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   { block: Block; ctx: Ctx; api: Api; scale: Scale; bars: ReturnType<typeof barIndex>; focus: { row: number; bar: number } | null }) {
   const { model, selKeys, linkMarked, compare, critical } = ctx;
@@ -1646,6 +1765,7 @@ const BarBlock = memo(function BarBlock({ block, ctx, api, scale, bars, focus }:
   }))}</>;
 });
 
+/** The links of the visible blocks, drawn as SVG paths with arrowheads; critical and selected links are marked. */
 const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, api, critical }:
   { links: Link[] | undefined; model: Model; bars: ReturnType<typeof barIndex>; scale: Scale; selKeys: ReadonlySet<string>; api: Api; critical: ReadonlySet<string> | null }) {
   const i18n = useI18n();
@@ -1662,13 +1782,15 @@ const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, 
   })}</>;
 });
 
-const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale, format }: { scale: Scale; major: ScaleUnit; minor: ScaleUnit; from: number; to: number; locale?: string; format?: ZoomLevel['format'] }) {
+/** The time scale above the chart: major ticks (months, quarters…) and minor ticks (weeks, days…). */
+const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale, format, weekStart }: { scale: Scale; major: ScaleUnit; minor: ScaleUnit; from: number; to: number; locale?: string; format?: ZoomLevel['format']; weekStart: number }) {
   return <>
-    {ticks(scale, major, from, to, locale, format?.[major]).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
-    {ticks(scale, minor, from, to, locale, format?.[minor]).map((t) => <div key={'m' + t.day} className="gx-tick gx-minor" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
+    {ticks(scale, major, from, to, locale, format?.[major], weekStart).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
+    {ticks(scale, minor, from, to, locale, format?.[minor], weekStart).map((t) => <div key={'m' + t.day} className="gx-tick gx-minor" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
   </>;
 });
 
+/** The chart's background: non-working days shaded and minor-tick grid lines. */
 const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, model, shade }: { scale: Scale; minor: ScaleUnit; from: number; to: number; model: Model; shade: boolean }) {
   const out: ReactNode[] = [];
   const cal = model.placement.calendar;
@@ -1689,13 +1811,16 @@ const BackgroundLayer = memo(function BackgroundLayer({ scale, minor, from, to, 
   return <>{out}</>;
 });
 
+/** Position and content of the hover tooltip. */
 interface TipState { x: number; y: number; content: ReactNode }
+/** The hover tooltip. Other components show or hide it through `setterRef` without re-rendering the chart. */
 function Tooltip({ setterRef }: { setterRef: React.RefObject<(s: TipState | null) => void> }) {
   const [tip, setTip] = useState<TipState | null>(null);
   setterRef.current = setTip;
   return tip ? <div className="gx-tooltip" role="tooltip" style={{ left: tip.x + 12, top: tip.y + 14 }}>{tip.content}</div> : null;
 }
 
+/** The built-in toolbar: zoom levels, Today, Fit, critical path and Schedule. */
 function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit, critical, setCritical, runSchedule, scheduleWhyNot }: ToolbarProps) {
   const { t: m } = useI18n();
   return (
@@ -1712,8 +1837,14 @@ function DefaultToolbar({ zoom, levels, setZoom, scrollToToday, fit, critical, s
   );
 }
 
+/** True when the user asked for reduced motion (scrolling then jumps instead of animating). */
 const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** A string made safe for use in an element id. */
 const cssId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '-');
+/**
+ * The point to keep in place while zooming: the selected task's start if on screen, otherwise today if on
+ * screen, otherwise the centre of the view. Returns its day and its pixel offset in the viewport.
+ */
 function zoomAnchor(el: HTMLElement, sc: Scale, selection: SelectionTarget[], model: Model, today: number): { day: number; px: number } {
   const w = el.clientWidth;
   const onScreen = (day: number) => { const px = (day - sc.origin) * sc.pxPerDay - el.scrollLeft; return px >= 0 && px <= w ? px : null; };
@@ -1733,17 +1864,21 @@ function todayIn(timeZone: string): string {
   try { return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
   catch { return new Date().toISOString().slice(0, 10); }
 }
+/** An ISO date as a day number. */
 const dayOfIso = (iso: string) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86_400_000);
 export { fmtDate };
 
+/** A short spoken label for a selection target, for screen-reader announcements. */
 function labelOf(t: SelectionTarget, mdl: Model, m: GanttMessages) {
   if (t.type === 'link') { const l = mdl.doc.links.find((x) => x.id === t.linkId); return l ? m.connectorName(mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target) : m.typeConnector; }
   return mdl.tasks.get(t.taskId)?.name ?? t.taskId;
 }
+/** Tooltip content for a task: name, dates, working days and progress. */
 function taskTip(t: Task, mdl: Model, { t: m, locale, num, pct }: I18n) {
   const p = mdl.placement.byId.get(t.id)!;
   return <><strong>{t.name}</strong><div>{fmtDate(p.start!, locale)} – {fmtDate(p.end!, locale)} · {m.tipWorkingDays(num(p.duration ?? 0))}</div>{t.type !== 'milestone' && <div>{m.tipComplete(pct(p.progress))}</div>}</>;
 }
+/** Tooltip content for a link: its type and lag, and a sentence saying what it means. */
 function linkTip(l: Link, mdl: Model, { t: m }: I18n) {
   return <><strong>{m.linkType[l.type]}{l.lag ? ` +${l.lag}` : ''}</strong><div>{m.linkSentence[l.type](mdl.tasks.get(l.source)?.name ?? l.source, mdl.tasks.get(l.target)?.name ?? l.target)}</div></>;
 }
@@ -1768,4 +1903,9 @@ function ProblemList({ doc, issues, why, onFix, onShow }: { doc: RoadmapDocument
       ))}
     </ul>
   );
+}
+
+/** Right-to-left for Arabic, Hebrew, Persian and Urdu locales (G14); everything else is left-to-right. */
+export function localeDir(locale?: string): 'ltr' | 'rtl' {
+  return /^(ar|he|iw|fa|ur)(-|$)/i.test(locale ?? '') ? 'rtl' : 'ltr';
 }

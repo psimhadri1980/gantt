@@ -30,10 +30,12 @@ export interface GanttBackend {
   subscribe(fn: (e: ServiceEvent) => void): () => void;
 }
 
+/** A failed backend request, with the service's error code or 'network' when the server could not be reached. */
 export class BackendError extends Error {
   constructor(message: string, readonly code: ServiceError['code'] | 'network') { super(message); }
 }
 
+/** Runs a service call and turns its errors into `BackendError`s, so both backends fail the same way. */
 const wrap = async <T>(fn: () => T): Promise<T> => {
   try { return await fn(); } catch (e) {
     if (e instanceof ServiceError) throw new BackendError(e.message, e.code);

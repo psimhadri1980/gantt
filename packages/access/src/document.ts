@@ -3,9 +3,12 @@ import type { AccessContext, Permission } from './types.ts';
 
 // Structural types, so the access package depends on nothing (plan section 0a).
 interface TaskLike { id: string; type?: string; owner?: string; kind?: string; parent: string | null; [k: string]: unknown }
+/** The parts of a link the filter needs. */
 interface LinkLike { id: string; source: string; target: string }
+/** The parts of a roadmap the filter needs, so it works on any document shape that has them. */
 interface DocLike { roadmap: { id: string }; tasks: TaskLike[]; links: LinkLike[] }
 
+/** The access context for a task: its project and the task fields rules can match on. */
 export const taskContext = (t: TaskLike, project?: string): AccessContext => ({
   project, task: { id: t.id, type: t.type, owner: t.owner, kind: t.kind, parent: t.parent },
 });

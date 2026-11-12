@@ -1,9 +1,17 @@
+/**
+ * The details panel (F8): the selected task's or link's fields, editable where permitted, with custom panels
+ * per kind; several selected tasks for bulk edits; and a roadmap summary when nothing is selected.
+ */
 import { memo, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import { formatDay, type Model, type SelectionTarget } from '@gantt/state';
 import { fromDay, type DayNum, type Placement, type ScheduleResult } from '@gantt/engine';
 import { useI18n, type I18n } from './i18n.ts';
 
+/**
+ * What a custom details panel for a kind of task or link receives: the item, the model, a way to select
+ * another item, whether a field may be edited, and the built-in panel (`Default`) to render or wrap.
+ */
 export interface DetailsProps<T> {
   item: T;
   model: Model;
@@ -11,17 +19,22 @@ export interface DetailsProps<T> {
   canEdit: (field: string) => boolean;
   Default: ComponentType;
 }
+/** How one kind of task or link is shown: its label, an optional icon, and optionally its own details panel. */
 export interface KindDefinition<T> {
   label: string;
   icon?: ReactNode;
   /** Replace the default details with the host's own component (which may render `Default`). */
   details?: ComponentType<DetailsProps<T>>;
 }
+/**
+ * The kinds a host defines (G7): per kind of row and per kind of link. A task's or link's `kind` field picks one.
+ */
 export interface GanttKinds {
   rows?: Record<string, KindDefinition<Task>>;
   links?: Record<string, KindDefinition<Link>>;
 }
 
+/** Everything the details panel needs from the Gantt: the selection, permission checks and edit callbacks. */
 interface Props {
   model: Model;
   selection: SelectionTarget[];
@@ -47,10 +60,14 @@ interface Props {
   openProposals?: number;
 }
 
+/** A day as a long date ("Fri, 13 Nov 2026"), or a dash when there is none. */
 const fmt = (d: DayNum | undefined, locale?: string) =>
   d === undefined ? '—' : formatDay(d, locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-const readOnly = () => false; // Phase 1: the panel is read-only.
 
+/**
+ * The details panel (F8): with nothing selected, a summary of the roadmap; with one task or link, its fields
+ * (editable where permitted, with the reason shown where not); with several tasks, the fields they share for bulk edits.
+ */
 export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds, select, barIds, i18n, whyNotEdit, edit, compare, analysis, whyNotLinkEdit, editLink, editMany, openProposals }: Props) {
   const { t: m } = i18n;
   const primary = selection[selection.length - 1];
@@ -61,9 +78,11 @@ export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds
     const l = model.doc.links.find((x) => x.id === primary.linkId);
     if (!l) body = <p className="gx-muted">{m.noLongerExists}</p>;
     else {
-      const Default = () => <LinkDetails link={l} model={model} select={select} kinds={kinds} analysis={analysis} why={whyNotLinkEdit ? whyNotLinkEdit() : 'read-only'} edit={editLink} />;
+      const why = whyNotLinkEdit ? whyNotLinkEdit() : 'read-only';
+      const Default = () => <LinkDetails link={l} model={model} select={select} kinds={kinds} analysis={analysis} why={why} edit={editLink} />;
       const Custom = l.kind ? kinds?.links?.[l.kind]?.details : undefined;
-      body = Custom ? <Custom item={l} model={model} select={select} canEdit={readOnly} Default={Default} /> : <Default />;
+      // A custom panel learns whether the link may be edited; links have no per-field rules, so every field answers alike.
+      body = Custom ? <Custom item={l} model={model} select={select} canEdit={() => why === null} Default={Default} /> : <Default />;
     }
   } else {
     const t = model.tasks.get(primary.taskId);
@@ -81,9 +100,11 @@ export const DetailsPanel = memo(function DetailsPanel({ model, selection, kinds
   return <aside className="gx-details" aria-label={m.details} tabIndex={-1}>{body}</aside>;
 });
 
+/** One label and value pair in a definition list. */
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <><dt>{label}</dt><dd>{children}</dd></>;
 }
+/** A task's name as a button that selects it (predecessors, successors and problems link to their tasks). */
 function TaskRef({ id, model, select }: { id: string; model: Model; select: Props['select'] }) {
   return <button className="gx-link-btn" onClick={() => select({ type: 'row', taskId: id })}>{model.tasks.get(id)?.name ?? id}</button>;
 }
@@ -113,6 +134,10 @@ function EditField({ label, value, display, type, taskId, field, whyNotEdit, onC
   </>;
 }
 
+/**
+ * The panel for one task: schedule, progress, dependencies, constraint, deadline, resources and custom fields,
+ * each editable when `whyNotEdit` allows it, plus what changed in comparison mode and the scheduling analysis.
+ */
 function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare, analysis }: { task: Task; model: Model; select: Props['select']; kinds?: GanttKinds; whyNotEdit?: Props['whyNotEdit']; edit?: Props['edit']; compare?: Props['compare']; analysis?: Props['analysis'] }) {
   const { t: m, locale, num, pct } = useI18n();
   const p = model.placement.byId.get(t.id)!;
@@ -198,6 +223,10 @@ function TaskDetails({ task: t, model, select, kinds, whyNotEdit, edit, compare,
   );
 }
 
+/**
+ * The panel for one link: its type and lag (editable when permitted), the two tasks it joins, and whether it is
+ * critical or breaks the schedule.
+ */
 function LinkDetails({ link: l, model, select, kinds, analysis, why, edit }: { link: Link; model: Model; select: Props['select']; kinds?: GanttKinds; analysis?: Props['analysis']; why: string | null; edit?: Props['editLink'] }) {
   const { t: m, num } = useI18n();
   const a = model.placement.byId.get(l.source), b = model.placement.byId.get(l.target);
@@ -234,6 +263,9 @@ function LinkDetails({ link: l, model, select, kinds, analysis, why, edit }: { l
   );
 }
 
+/**
+ * The panel for several selected tasks: the values they share, and fields that set the same value on all of them.
+ */
 function Multi({ model, selection, whyNotEdit, editMany }: { model: Model; selection: SelectionTarget[]; whyNotEdit?: Props['whyNotEdit']; editMany?: Props['editMany'] }) {
   const { t: m, locale, num } = useI18n();
   // Leaf tasks only: summaries derive their progress, and group rows are not tasks.
@@ -266,6 +298,7 @@ function Multi({ model, selection, whyNotEdit, editMany }: { model: Model; selec
   </div>;
 }
 
+/** The panel with nothing selected: the roadmap's span, task counts, progress, critical path and open Proposals. */
 function RoadmapSummary({ model, analysis, select, openProposals }: { model: Model; analysis?: Props['analysis']; select: Props['select']; openProposals?: number }) {
   const { t: m, locale, num, pct } = useI18n();
   const r = model.doc.roadmap, span = model.placement.span;
@@ -292,8 +325,10 @@ function RoadmapSummary({ model, analysis, select, openProposals }: { model: Mod
   </div>;
 }
 
+/** An ISO date as a day number. */
 const dayOf = (iso: string) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86_400_000);
 
+/** A number field for a link's lag that commits on Enter or blur and reverts invalid input. */
 function LagInput({ value, label, onCommit }: { value: number; label: string; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);

@@ -17,6 +17,9 @@ export class AccessEvaluator {
   /** True when the configuration grants `view` at all; without it nothing is fetched or rendered (L6). */
   get canView(): boolean { return this.can('view'); }
 
+  /**
+   * True when the subject has `permission` in this context: at least one matching allow rule and no matching deny.
+   */
   can(permission: Permission, ctx: AccessContext = {}): boolean {
     // Cached per task, Proposal and field (L13). Rules with conditions are dynamic and skip the cache.
     const t = ctx.task, pr = ctx.proposal;
@@ -79,8 +82,10 @@ export class AccessEvaluator {
   private taskDependence = new Map<Permission, boolean>();
 
   private fieldRules: boolean | undefined;
+  /** True when any rule restricts individual fields, so field checks can be skipped entirely otherwise. */
   private hasFieldRules() { return (this.fieldRules ??= this.rules.some((r) => r.permissions.includes('view.fields'))); }
 
+  /** Remembers a decision, unless a condition made it depend on the data. */
   private store(key: string, v: boolean, cacheable: boolean) { if (cacheable) this.cache.set(key, v); }
 
   /**
@@ -115,6 +120,9 @@ export class AccessEvaluator {
 
 const ALWAYS_VISIBLE = new Set(['id', 'name', 'type', 'parent', 'kind', 'lane', 'hasChildren']);
 
+/**
+ * True when the rule applies to the subject: it names none of the subject's roles or groups, or names no roles at all.
+ */
 function appliesToSubject(r: Rule, s: Subject): boolean {
   if (!r.roles) return true;
   return r.roles.some((x) => s.roles?.includes(x) || s.groups?.includes(x));

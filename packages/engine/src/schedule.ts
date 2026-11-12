@@ -1,3 +1,7 @@
+/**
+ * Placement: where each task's bar is drawn (start, end, duration, progress), from its stored dates on its
+ * calendar. Summaries span their children. Unlike the scheduler, placement does not move tasks to satisfy links.
+ */
 import type { Issue, RoadmapDocument, Task } from '@gantt/contract';
 import { buildCalendars, fromDay, spanOf, toDay, workDays, WorkCalendar, type DayNum } from './calendar.ts';
 
@@ -16,6 +20,7 @@ export interface PlacedTask {
   endFraction?: number;
 }
 
+/** The placed roadmap: each task's start, end, duration and progress as drawn, plus the default calendar. */
 export interface Placement {
   byId: Map<string, PlacedTask>;
   calendar: WorkCalendar;
