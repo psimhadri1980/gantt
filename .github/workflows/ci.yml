@@ -1,0 +1,48 @@
+name: CI
+
+# Every pull request runs the unit checks and the end-to-end browser tests; so does every push to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Boundaries, types and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check:boundaries
+      - run: npm run typecheck
+      - run: npm test
+
+  e2e:
+    name: End-to-end (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # GitHub's Ubuntu runners include Google Chrome at /usr/bin/google-chrome, which the tests drive headless.
+      - run: google-chrome --version
+      - run: npm run e2e
+        env:
+          CI: 'true'

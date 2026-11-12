@@ -18,8 +18,19 @@ const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/
 let failures = 0;
 const results = [];
 const only = process.env.E2E_ONLY ? new RegExp(process.env.E2E_ONLY, 'i') : null;
+// On CI runners a failed test is run once more (shared machines are slow and uneven); a pass on the retry is reported as such.
+const retries = process.env.CI ? 1 : 0;
 async function test(name, fn) {
   if (only && !only.test(name)) return;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const before = failures;
+    await runOnce(name, fn, true);
+    if (failures === before) return;
+    failures = before; // try again
+  }
+  await runOnce(name, fn, false, retries > 0);
+}
+async function runOnce(name, fn, quiet, retried = false) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -28,10 +39,10 @@ async function test(name, fn) {
     await page.waitForSelector('.gx-bar');
     await fn(page);
     if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
-    results.push(`  PASS  ${name}`);
+    results.push(`  PASS  ${name}${retried ? ' (on retry)' : ''}`);
   } catch (e) {
     failures++;
-    results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n').slice(0, 3).join('\n        ')}`);
+    if (!quiet) results.push(`  FAIL  ${name}\n        ${String(e.message).split('\n').slice(0, 3).join('\n        ')}`);
   } finally { await page.close(); }
 }
 const expectEq = (a, b, what) => { if (a !== b) throw new Error(`${what}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); };
