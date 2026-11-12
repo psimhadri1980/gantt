@@ -6,7 +6,7 @@ import type { Concurrency, GanttBackend, ProposalSummary, RefreshPreview, Servic
 import { ConcurrentPanel, ProposalList, RefreshDialog } from './together.tsx';
 import type { DataOperation, GanttOperation } from '@gantt/state';
 import { changesOf, CoreGantt, fmtDate, type GanttHandle, type GanttProps } from './Gantt.tsx';
-import { mergeMessages, makeI18n, type GanttMessages } from './i18n.ts';
+import { localizeReason, mergeMessages, makeI18n, type GanttMessages } from './i18n.ts';
 
 type EventName = ServiceEvent['type'];
 type EventCallbacks = { [K in EventName as `on${Capitalize<K>}`]?: (e: ServiceEvent & { type: K }) => void };
@@ -222,8 +222,8 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   else if (view.kind === 'proposal' && proposal) {
     if (proposal.state === 'Submitted' || proposal.state === 'Reviewed') readOnly = 'The Proposal is locked for review; withdraw it to make changes';
     else if (proposal.state !== 'Draft' && proposal.state !== 'Returned') readOnly = m.closedReadOnly(m.state[proposal.state] ?? proposal.state);
-    else if (snap && !snap.can['proposal.edit']) readOnly = 'Missing permission: proposal.edit';
-  } else if (view.kind === 'current' && snap && !snap.can['proposal.create'] && !editableOwn(snap, backend.userId).length) readOnly = 'Missing permission: proposal.create';
+    else if (snap && !snap.can['proposal.edit']) readOnly = m.missingPermission('proposal.edit');
+  } else if (view.kind === 'current' && snap && !snap.can['proposal.create'] && !editableOwn(snap, backend.userId).length) readOnly = m.missingPermission('proposal.create');
 
   // Saving (H7, H8): every change is sent at once, in order; a refusal rolls the view back to the server's state.
   const queue = useRef(Promise.resolve());
@@ -315,9 +315,9 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
   const [history, setHistory] = useState(false);
   const [panel, setPanel] = useState<'list' | 'concurrent' | null>(null);
   const ccCount = cc ? cc.inProposal.length + new Set(cc.parallel.map((o) => o.taskId)).size : 0;
-  const canRefresh = snap.can['proposal.refresh'] ? null : 'Missing permission: proposal.refresh';
+  const canRefresh = snap.can['proposal.refresh'] ? null : m.missingPermission('proposal.refresh');
   const editable = proposal && (proposal.state === 'Draft' || proposal.state === 'Returned');
-  const canPick = editable ? (snap.can['proposal.edit'] ? null : 'Missing permission: proposal.edit') : (snap.can['proposal.approve'] ? null : 'Missing permission: proposal.approve');
+  const canPick = editable ? (snap.can['proposal.edit'] ? null : m.missingPermission('proposal.edit')) : (snap.can['proposal.approve'] ? null : m.missingPermission('proposal.approve'));
   const { num } = makeI18n(m, locale);
   const day = (iso?: string) => (iso ? fmtDate(Math.floor(Date.parse(iso) / 86_400_000), locale) : '');
   const value = view.kind === 'current' ? 'current' : view.kind === 'proposal' ? `p:${view.id}` : `v:${view.version}`;
@@ -358,7 +358,8 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
       {proposal && (
         <div className="gx-pbar-row gx-pbar-actions" role="group" aria-label={m.proposalBar}>
           {ACTIONS.map((a) => {
-            const why = proposal.actions?.[a];
+            const rawWhy = proposal.actions?.[a];
+            const why = rawWhy === undefined ? undefined : localizeReason(m, rawWhy);
             // Where Approve would be, a stale Proposal shows the reason and the Refresh action (K19).
             const refreshHere = a === 'approve' && proposal.stale && (why !== undefined) ? (
               <button key="refresh" data-action="refresh" className="gx-btn gx-primary" aria-disabled={!!canRefresh || undefined} title={canRefresh ?? undefined}
@@ -367,8 +368,8 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
             if (refreshHere && why?.startsWith('Not possible while')) return refreshHere;
             if (why === undefined) return null;
             // Actions that do not apply in this state are left out; a missing permission or a rule is explained (F14).
-            if (why?.startsWith('Not possible while')) return null;
-            if (why && hide && why.startsWith('Missing permission')) return null;
+            if (rawWhy?.startsWith('Not possible while')) return null;
+            if (rawWhy && hide && rawWhy.startsWith('Missing permission')) return null;
             return (<span key={a} className="gx-act">{refreshHere}
               <button data-action={a} className={`gx-btn${a === 'approve' && !proposal.stale ? ' gx-primary' : ''}`} aria-disabled={!!why || undefined} title={why ?? undefined}
                 aria-describedby={why ? `gx-why-${a}` : undefined}

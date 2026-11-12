@@ -315,6 +315,8 @@ export interface GanttMessages {
   exportFailed: (reason: string) => string;
   fullscreen: string;
   exitFullscreen: string;
+  /** A refusal for a missing permission (L4), and for one on a single field. */
+  missingPermission: (permission: string, field?: string) => string;
 }
 
 export const defaultMessages: GanttMessages = {
@@ -613,6 +615,7 @@ export const defaultMessages: GanttMessages = {
   exportFailed: (r) => `Export failed: ${r}`,
   fullscreen: 'Full screen',
   exitFullscreen: 'Exit full screen',
+  missingPermission: (p, f) => `Missing permission: ${p}${f ? ` for the field “${f}”` : ''}`,
   keyboardHint: 'Select a row, bar or connector to see its details. Keyboard: ↑↓ move, ←→ collapse/expand or step through lane bars, Space select, Enter open lane, Esc clear, +/− zoom, T today, F6 details panel.',
 };
 
@@ -631,6 +634,17 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     progressStatus: { ...defaultMessages.progressStatus, ...over.progressStatus },
     exportAs: { ...defaultMessages.exportAs, ...over.exportAs },
   };
+}
+
+/**
+ * Shows a refusal reason in the user's language. Reasons are produced in English by the access layer and the
+ * service (they are also logged and matched on); the known patterns are re-worded here, anything else is shown
+ * as it came.
+ */
+export function localizeReason(t: GanttMessages, reason: string | null | undefined): string | null {
+  if (reason == null) return null;
+  const m = /^Missing permission: ([\w.]+)(?: for the field “([^”]+)”)?$/.exec(reason);
+  return m ? t.missingPermission(m[1]!, m[2]) : reason;
 }
 
 export interface I18n { t: GanttMessages; locale?: string; num: (n: number) => string; pct: (v: number) => string }

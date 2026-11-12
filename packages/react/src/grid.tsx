@@ -77,7 +77,7 @@ export const gridWidth = (cols: GridColumn[]) => cols.reduce((s, c) => s + c.wid
 export function frozenStyle(cols: GridColumn[], frozen: number, i: number): CSSProperties | undefined {
   if (i >= frozen) return undefined;
   let left = 0; for (let k = 0; k < i; k++) left += cols[k]!.width;
-  return { position: 'sticky', left, zIndex: 1 };
+  return { position: 'sticky', insetInlineStart: left, zIndex: 1 };
 }
 
 export interface HeaderProps {
@@ -179,7 +179,7 @@ export const GridBlock = memo(function GridBlock({ block, ctx, api, focusRow }: 
         {cols.map((c, ci) => {
           const st = frozenStyle(cols, frozen, ci);
           const cls = `gx-col-${c.id}${ci < frozen ? ' gx-frozen' : ''}`;
-          if (c.id === 'name') return <span key={c.id} className={cls} role="gridcell" style={{ ...st, paddingLeft: 6 + r.depth * 16 }}>
+          if (c.id === 'name') return <span key={c.id} className={cls} role="gridcell" style={{ ...st, paddingInlineStart: 6 + r.depth * 16 }}>
             {c.cell && !group ? <c.cell {...cellProps} /> : <NameCell r={r} t={t} ctx={ctx} api={api} />}
           </span>;
           if (c.id === ACTION) return <span key={c.id} className={cls} role="gridcell" style={st}>

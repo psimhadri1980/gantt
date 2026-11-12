@@ -7,6 +7,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { schedule } from '../packages/engine/src/index.ts';
 import { generate } from '../packages/mock/src/generate.ts';
+import { defaultMessages } from '../packages/react/src/i18n.ts';
+import { germanMessages } from '../packages/react/src/messages.de.ts';
 import smallSample from '../packages/mock/src/samples/small.json' with { type: 'json' };
 
 const root = new URL('../apps/demo/', import.meta.url).pathname;
@@ -193,6 +195,30 @@ await test('all visible text follows the messages and locale (German sample)', a
   const details = await page.locator('.gx-details').textContent();
   if (!details.includes('Zeitplan') || !details.includes('Fortschritt')) throw new Error(`details not translated: ${details.slice(0, 120)}`);
   if (!/\d+\.\s?Nov/.test(details) && !/Nov\./.test(details)) throw new Error(`dates not in German format: ${details.slice(0, 160)}`);
+  // No English interface text left: every plain message that differs in German must be absent from the visible text,
+  // the accessible names and the tooltips of the component (task names are data and stay as they are).
+  const english = Object.entries(defaultMessages)
+    .filter(([k, v]) => typeof v === 'string' && v !== germanMessages[k] && v.length > 3 && /[a-z]{4}/i.test(v))
+    .map(([, v]) => v);
+  const shown = await page.locator('.gx-root').first().evaluate((el) => {
+    const out = [el.innerText];
+    for (const n of el.querySelectorAll('[aria-label],[title],[placeholder]')) out.push(n.getAttribute('aria-label') ?? '', n.getAttribute('title') ?? '', n.getAttribute('placeholder') ?? '');
+    return out.join('\n');
+  });
+  const data = new Set(smallSample.tasks.map((t) => t.name));
+  const left = english.filter((v) => shown.split('\n').some((line) => line.trim() === v && !data.has(v)));
+  if (left.length) throw new Error(`English text in the German interface: ${left.join(', ')}`);
+});
+
+await test('right-to-left layout mirrors the table and keeps the timeline left to right (G14)', async (page) => {
+  await page.selectOption('select >> nth=3', 'ar');
+  await page.locator('.gx-root[dir="rtl"]').first().waitFor();
+  const [grid, chart] = await Promise.all([page.locator('.gx-grid').first().boundingBox(), page.locator('.gx-chart').first().boundingBox()]);
+  if (!(grid.x > chart.x)) throw new Error(`table should be right of the chart: grid ${grid.x}, chart ${chart.x}`);
+  const dir = await page.locator('.gx-chart').first().evaluate((el) => getComputedStyle(el).direction);
+  if (dir !== 'ltr') throw new Error(`timeline direction ${dir}`);
+  const days = await page.locator('.gx-tick.gx-major').evaluateAll((els) => els.slice(0, 2).map((e) => e.getBoundingClientRect().x));
+  if (!(days[0] < days[1])) throw new Error('dates should run left to right');
 });
 
 await test('save indicator shows Saving, then Saved or the reason it was not saved (F13)', async (page) => {
@@ -608,7 +634,8 @@ await test('custom scale labels and a fixed start boundary (G2, G3)', async (pag
   await page.evaluate(() => { document.querySelector('.gx-chart').scrollLeft = 0; });
   await page.waitForTimeout(200);
   const first = await page.evaluate(() => [...document.querySelectorAll('.gx-tick.gx-minor')].find((t) => parseFloat(t.style.left) <= 0 && parseFloat(t.style.left) + parseFloat(t.style.width) > 0)?.textContent);
-  expectEq(first, 'W44 · 26 Oct', 'the scale starts at the fixed boundary');
+  // The browser runs in en-US, where weeks start on Sunday (G14): the week holding the Monday 26 Oct boundary begins on the 25th.
+  expectEq(first, 'W44 · 25 Oct', 'the scale starts at the fixed boundary');
 });
 
 // ---------- Phase 8: tracking ----------

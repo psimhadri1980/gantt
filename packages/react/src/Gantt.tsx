@@ -1,7 +1,7 @@
 import { Component, forwardRef, memo, startTransition, useImperativeHandle, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from 'react';
 import type { Link, RoadmapDocument, Task } from '@gantt/contract';
 import {
-  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel, type ScaleUnit,
+  applyDataOperation, flattenOps, isDataOperation, mergeChildren, barIndex, buildModel, OperationPipeline, layoutRows, linkPath, rowAt, targetKey, ticks, localeWeekStart, totalHeight, xOf, ZOOM_LEVELS, DEFAULT_SIZES, type RowSizes, type ZoomLevel, type ScaleUnit,
   type DataOperation, type GanttOperation, type Model, type OperationContext, type OperationHooks, type OperationResult,
   type RowLayout, type Scale, type SelectionTarget, type ViewOperation,
   copyTasks, duplicateOps, fieldValue, findTasks, indentOps, isGroupId, moveOps, newTaskOps, outdentOps, pasteOps, viewModel,
@@ -14,7 +14,7 @@ import { DragController, type DragKind } from './drag.ts';
 import { ContextMenu, type MenuItem } from './menu.tsx';
 import type { ScheduleResult } from '@gantt/engine';
 import { DetailsPanel, type GanttKinds } from './Details.tsx';
-import { I18nContext, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
+import { I18nContext, localizeReason, makeI18n, mergeMessages, useI18n, type GanttMessages, type I18n } from './i18n.ts';
 import { builtinColumns, columnState, fmtDate, gridTemplate, gridWidth, GridBlock, GridHeader, PlaceholderRow, resolveColumns, type CellProps, type GridColumn } from './grid.tsx';
 import { ColumnsPanel, FilterValues, FindBar, Popover, ViewPicker } from './viewtools.tsx';
 import type { PlacedTask } from '@gantt/engine';
@@ -34,6 +34,13 @@ export interface GanttProps {
   kinds?: GanttKinds;
   theme?: 'light' | 'dark';
   locale?: string;
+  /**
+   * Text direction (G14). Defaults from `locale`: Arabic, Hebrew, Persian and Urdu are right-to-left. In right-to-left
+   * the table, toolbar and details panel are mirrored; the timeline itself still runs left to right (earlier dates left).
+   */
+  dir?: 'ltr' | 'rtl';
+  /** First day of the week for week ticks: 0 = Sunday … 6 = Saturday. Defaults from `locale` (Monday if unknown). */
+  weekStart?: number;
   /** Vertical markers (F7) in addition to today. */
   markers?: { date: string; label: string }[];
   /** "Today" for the marker; defaults to the roadmap's status date, then the real date. */
@@ -401,7 +408,7 @@ export const CoreGantt = forwardRef<GanttHandle, CoreProps>(function CoreGantt(p
     }, fail);
     return () => { cancelled = true; };
   }, [doc, built, failure, attempt]);
-  const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
+  const themeAttr = { ...(props.theme ? { 'data-theme': props.theme } : {}), dir: props.dir ?? localeDir(props.locale) };
   if (failure?.doc === doc) return <ErrorState {...props} message={failure.message} retry={retry} themeAttr={themeAttr} />;
   // While a changed document is being placed, keep showing the previous one (no loading flash).
   if (!built) {
@@ -450,6 +457,7 @@ function GanttView(props: CoreProps & {
   const { data, kinds, locale, detailsPanel = 'right', height = 600, run } = props;
   const baseModel = props.model;
   const i18n = useMemo(() => makeI18n(mergeMessages(props.messages), locale), [props.messages, locale]);
+  const weekStart = useMemo(() => props.weekStart ?? localeWeekStart(locale), [props.weekStart, locale]);
   const m = i18n.t;
   // The view (D9–D11, D18, F12): controlled by the host when it passes `view`.
   const [vsState, setVsState] = useState<GanttViewState>(() => props.view ?? {});
@@ -784,7 +792,7 @@ function GanttView(props: CoreProps & {
     return out;
   }, [critical, analysis]);
   const scheduleWhyNot = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : i18n.t.readOnly)
-    : props.evaluator && !props.evaluator.can('schedule.run', { project: data.roadmap.id }) ? 'Missing permission: schedule.run' : null;
+    : props.evaluator && !props.evaluator.can('schedule.run', { project: data.roadmap.id }) ? m.missingPermission('schedule.run') : null;
   const [scheduleNote, setScheduleNote] = useState('');
   const runSchedule = useCallback(() => {
     const r = rescheduleOps(data, props.evaluator);
@@ -807,12 +815,12 @@ function GanttView(props: CoreProps & {
     const ev = props.evaluator;
     if (!ev) return null;
     const d = checkChange(ev, { entity: 'task', op: 'update', id: taskId, fields: { [field]: null } }, t as never, data.roadmap.id);
-    return d.allowed ? null : d.reason!;
+    return d.allowed ? null : localizeReason(i18n.t, d.reason!);
   }, [props.readOnly, props.evaluator, model, data.roadmap.id, i18n, fieldLabel, vs.groupBy]);
   const editTask = useCallback((taskId: string, fields: Partial<Task>) => run({ type: 'task.update', id: taskId, fields }, 'user'), [run]);
   const whyNotLinkEdit = useCallback(() => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
-    return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? 'Missing permission: link.modify' : null;
+    return props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? m.missingPermission('link.modify') : null;
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   const editLink = useCallback((id: string, fields: Partial<Link>) => run({ type: 'link.update', id, fields }, 'user').then((r) => { if (!r.ok) setAnnounce(r.reason); }), [run]);
   const editMany = useCallback((ids: string[], fields: Partial<Task>) => run({ type: 'batch', label: 'bulk', ops: ids.map((id) => ({ type: 'task.update' as const, id, fields })) }, 'user')
@@ -821,7 +829,7 @@ function GanttView(props: CoreProps & {
 
   // ---------- Editing on the chart (Phase 5) ----------
   const [notice, setNotice] = useState('');
-  const say = useCallback((text: string) => { setNotice(text); setAnnounce(text); }, []);
+  const say = useCallback((text: string) => { const t = localizeReason(i18nRef.current.t, text) ?? text; setNotice(t); setAnnounce(t); }, []);
   const commit = useCallback((op: DataOperation) => { void run(op, 'user').then((r) => { if (!r.ok) say(r.reason); }); }, [run, say]);
   const dataRef = useRef(data); dataRef.current = data;
   const modelRef = useRef(model); modelRef.current = model;
@@ -829,7 +837,7 @@ function GanttView(props: CoreProps & {
   const whyNotLinkFor = useCallback((src: string, tgt: string, type: Link['type']) => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : i18n.t.readOnly;
     const ev = props.evaluator;
-    if (ev && !ev.can('link.create', { project: data.roadmap.id })) return 'Missing permission: link.create';
+    if (ev && !ev.can('link.create', { project: data.roadmap.id })) return m.missingPermission('link.create');
     return whyNotLink(dataRef.current, src, tgt, type);
   }, [props.readOnly, props.evaluator, data.roadmap.id, i18n]);
   /** Tasks the keyboard edits act on: the selection, else the focused row. */
@@ -1103,8 +1111,8 @@ function GanttView(props: CoreProps & {
     if (t.type === 'link') {
       const l = data.links.find((x) => x.id === t.linkId); if (!l) return [];
       const why = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly)
-        : props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? 'Missing permission: link.modify' : null;
-      const whyDel = props.readOnly ? why : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? 'Missing permission: link.delete' : null;
+        : props.evaluator && !props.evaluator.can('link.modify', { project: data.roadmap.id }) ? m.missingPermission('link.modify') : null;
+      const whyDel = props.readOnly ? why : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? m.missingPermission('link.delete') : null;
       return [
         ...(['FS', 'SS', 'FF', 'SF'] as const).map((ty) => ({ label: m.linkType[ty], checked: l.type === ty, why, run: () => commit({ type: 'link.update', id: l.id, fields: { type: ty } }) })),
         { separator: true, label: '' },
@@ -1135,7 +1143,7 @@ function GanttView(props: CoreProps & {
       { label: m.undo, shortcut: 'Ctrl+Z', why: props.history.canUndo ? null : m.nothingToUndo, run: () => void props.history.undo() },
       { label: m.redo, shortcut: 'Ctrl+Y', why: props.history.canRedo ? null : m.nothingToRedo, run: () => void props.history.redo() },
       { separator: true, label: '' },
-      { label: m.deleteTask, shortcut: 'Del', why: props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('task.delete', { project: data.roadmap.id }) ? 'Missing permission: task.delete' : null, run: () => commit({ type: 'task.delete', id }) },
+      { label: m.deleteTask, shortcut: 'Del', why: props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('task.delete', { project: data.roadmap.id }) ? m.missingPermission('task.delete') : null, run: () => commit({ type: 'task.delete', id }) },
     ];
   };
 
@@ -1203,7 +1211,7 @@ function GanttView(props: CoreProps & {
   };
   const whyNotCreate = (parent: string) => {
     const ro = props.readOnly; if (ro) return typeof ro === 'string' ? ro : m.readOnly;
-    return props.evaluator && !props.evaluator.can('task.create', { project: data.roadmap.id }) ? 'Missing permission: task.create' : null;
+    return props.evaluator && !props.evaluator.can('task.create', { project: data.roadmap.id }) ? m.missingPermission('task.create') : null;
     void parent;
   };
 
@@ -1262,7 +1270,8 @@ function GanttView(props: CoreProps & {
   const [gridHidden, setGridHidden] = useState(false);
   const startSplit = (e: React.PointerEvent) => {
     const x0 = e.clientX, w0 = gridW;
-    const mv = (ev: PointerEvent) => setGridW(Math.max(GRID_MIN, Math.min(900, w0 + ev.clientX - x0)));
+    const sign = rootRef.current?.dir === 'rtl' ? -1 : 1; // in right-to-left the table grows when dragging left
+    const mv = (ev: PointerEvent) => setGridW(Math.max(GRID_MIN, Math.min(900, w0 + sign * (ev.clientX - x0))));
     const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
   };
@@ -1278,7 +1287,7 @@ function GanttView(props: CoreProps & {
   /** Why a fix may not be applied: read-only, or a field the user may not change (C5, F14). */
   const whyNotFix = (f: IssueFix): string | null => {
     for (const op of f.ops) {
-      if (op.type === 'link.delete') { const w = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? 'Missing permission: link.delete' : null; if (w) return w; }
+      if (op.type === 'link.delete') { const w = props.readOnly ? (typeof props.readOnly === 'string' ? props.readOnly : m.readOnly) : props.evaluator && !props.evaluator.can('link.delete', { project: data.roadmap.id }) ? m.missingPermission('link.delete') : null; if (w) return w; }
       else for (const f2 of Object.keys(op.fields)) { const w = whyNotEdit(op.id, f2); if (w) return w; }
     }
     return null;
@@ -1402,7 +1411,7 @@ function GanttView(props: CoreProps & {
   const gridOff = compact ? !gridOnCompact : gridHidden;
 
   const Toolbar = props.toolbar === false ? null : props.toolbar ?? DefaultToolbar;
-  const themeAttr = props.theme ? { 'data-theme': props.theme } : {};
+  const themeAttr = { ...(props.theme ? { 'data-theme': props.theme } : {}), dir: props.dir ?? localeDir(props.locale) };
   const visibleBlocks = blocks.slice(view.b0, view.b1);
   // The chart side (bars, links, ticks) shows only the on-screen part while settling after a zoom.
   const chartBlocks = settling ? blocks.slice(view.v0, view.v1) : visibleBlocks;
@@ -1540,14 +1549,14 @@ function GanttView(props: CoreProps & {
               <div className="gx-splitter" role="separator" aria-orientation="vertical" aria-label={m.resizeGrid} tabIndex={0}
                 aria-valuenow={gridW} aria-valuemin={GRID_MIN} aria-valuemax={900}
                 onPointerDown={startSplit}
-                onKeyDown={(e) => { if (e.key === 'ArrowLeft') setGridW((w) => Math.max(GRID_MIN, w - 20)); if (e.key === 'ArrowRight') setGridW((w) => Math.min(900, w + 20)); }} />
+                onKeyDown={(e) => { const grow = (e.key === 'ArrowRight') !== (rootRef.current?.dir === 'rtl'); if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') setGridW((w) => Math.max(GRID_MIN, Math.min(900, w + (grow ? 20 : -20)))); }} />
             </div>
           )}
 
           <div className="gx-chart-wrap">
             <div className="gx-scale" ref={headerRef} aria-hidden>
               <div ref={headerInnerRef} style={{ width: chartWidth, position: 'relative', height: '100%' }}>
-                <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} format={level.format} />
+                <ScaleLayer scale={scale} major={level.major} minor={level.minor} from={dayFrom} to={dayTo} locale={locale} format={level.format} weekStart={weekStart} />
               </div>
             </div>
             <div className="gx-chart" ref={chartRef} onScroll={onScroll} tabIndex={0} role="region" aria-label={m.timeline}
@@ -1724,10 +1733,10 @@ const LinkGroup = memo(function LinkGroup({ links, model, bars, scale, selKeys, 
   })}</>;
 });
 
-const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale, format }: { scale: Scale; major: ScaleUnit; minor: ScaleUnit; from: number; to: number; locale?: string; format?: ZoomLevel['format'] }) {
+const ScaleLayer = memo(function ScaleLayer({ scale, major, minor, from, to, locale, format, weekStart }: { scale: Scale; major: ScaleUnit; minor: ScaleUnit; from: number; to: number; locale?: string; format?: ZoomLevel['format']; weekStart: number }) {
   return <>
-    {ticks(scale, major, from, to, locale, format?.[major]).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
-    {ticks(scale, minor, from, to, locale, format?.[minor]).map((t) => <div key={'m' + t.day} className="gx-tick gx-minor" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
+    {ticks(scale, major, from, to, locale, format?.[major], weekStart).map((t) => <div key={'M' + t.day} className="gx-tick gx-major" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
+    {ticks(scale, minor, from, to, locale, format?.[minor], weekStart).map((t) => <div key={'m' + t.day} className="gx-tick gx-minor" style={{ left: t.x, width: t.w }}><span>{t.label}</span></div>)}
   </>;
 });
 
@@ -1830,4 +1839,9 @@ function ProblemList({ doc, issues, why, onFix, onShow }: { doc: RoadmapDocument
       ))}
     </ul>
   );
+}
+
+/** Right-to-left for Arabic, Hebrew, Persian and Urdu locales (G14); everything else is left-to-right. */
+export function localeDir(locale?: string): 'ltr' | 'rtl' {
+  return /^(ar|he|iw|fa|ur)(-|$)/i.test(locale ?? '') ? 'rtl' : 'ltr';
 }
