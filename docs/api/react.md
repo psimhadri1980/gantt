@@ -287,6 +287,11 @@ export interface GanttMessages {
   closedReadOnly: (state: string) => string;
   returnedReason: (reason: string) => string;
   historyEntry: (who: string, action: string, date: string) => string;
+  /** History steps by action, the reason a Proposal under review is read-only, and the default baseline name. */
+  historyAction: Record<'create' | 'change' | 'submit' | 'withdraw' | 'review' | 'approve' | 'return' | 'reject' | 'discard' | 'expire' | 'newFrom' | 'pick' | 'refresh' | 'undoRefresh', string>;
+  separationOfDuties: (enforced: boolean) => string;
+  lockedForReview: string;
+  baselineDefaultName: (version: string) => string;
   // scheduling (Phase 4)
   criticalPath: string;
   scheduleHint: string;
