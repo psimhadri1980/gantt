@@ -200,6 +200,23 @@ export class RoadmapService {
   private canViewTask(ev: AccessEvaluator, t: Task) {
     return ev.can('view', { project: this.roadmapInfo.id, task: { id: t.id, type: t.type, owner: t.owner, kind: t.kind, parent: t.parent } });
   }
+  /**
+   * Checks each change against the user's permissions on the task as it is in `doc` (L12): a task they cannot
+   * see is unknown to them, and each field needs its own permission. Tasks created earlier in the list count.
+   */
+  private checkChanges(ev: AccessEvaluator, doc: RoadmapDocument, input: readonly ChangeInput[]) {
+    const byId = new Map(doc.tasks.map((t) => [t.id, t]));
+    for (const c of input) {
+      const task = c.entity === 'task' ? byId.get(c.id) : undefined;
+      if (c.entity === 'task' && c.op !== 'create' && (!task || !this.canViewTask(ev, task))) {
+        throw new ServiceError(`Unknown task "${c.id}"`, 'notFound');
+      }
+      const d = checkChange(ev, c, task as never, this.roadmapInfo.id);
+      if (!d.allowed) throw new ServiceError(d.reason!, 'denied');
+      if (c.entity === 'task' && c.op === 'create') byId.set(c.id, { id: c.id, ...(c as { fields?: object }).fields } as Task);
+      else if (c.entity === 'task' && c.op === 'update' && task) byId.set(c.id, { ...task, ...(c as { fields?: object }).fields } as Task);
+    }
+  }
   /** True when the user may see this Proposal: their own, or anyone's with `proposal.viewOthers`. */
   private canSee(ev: AccessEvaluator, p: ProposalRecord) {
     return p.owner === ev.subject.id || ev.can('proposal.viewOthers', { project: this.roadmapInfo.id, proposal: { id: p.id, owner: p.owner } });
@@ -262,17 +279,7 @@ export class RoadmapService {
         owner: userId, baseVersion: this.currentVersion, now: this.now(), limits: this.config.limits,
       });
     }
-    const before = this.build(p);
-    const byId = new Map(before.tasks.map((t) => [t.id, t]));
-    for (const c of input) {
-      const task = c.entity === 'task' ? byId.get(c.id) : undefined;
-      // A user may not change a task, or a field, they cannot see (L12).
-      if (c.entity === 'task' && c.op !== 'create' && (!task || !ev.can('view', { project: this.roadmapInfo.id, task: { id: task.id, type: task.type, owner: task.owner, kind: task.kind, parent: task.parent } }))) {
-        throw new ServiceError(`Unknown task "${c.id}"`, 'notFound');
-      }
-      const d = checkChange(ev, c, task as never, this.roadmapInfo.id);
-      if (!d.allowed) throw new ServiceError(d.reason!, 'denied');
-    }
+    this.checkChanges(ev, this.build(p), input);
     const at = new Date(this.now()).toISOString();
     const changes = input.map((c) => ({ ...c, by: userId, at }));
     const rec = recordChanges(p, changes, userId, this.now());
@@ -541,7 +548,10 @@ export class RoadmapService {
     const src = this.get(id);
     if (!this.canSee(ev, src)) throw new ServiceError('You may not view this Proposal', 'denied');
     this.require(ev, 'proposal.create');
-    const changes = src.changes.map((c) => ({ ...c, by: userId, at: new Date(this.now()).toISOString() }));
+    // The changes as they stand after its picks, and only those this user may make themself.
+    const own = effectiveChanges(src);
+    this.checkChanges(ev, this.baseOf({ baseVersion: this.currentVersion } as ProposalRecord), own);
+    const changes = own.map((c) => ({ ...c, by: userId, at: new Date(this.now()).toISOString() }));
     const p = createProposal({
       id: `p${++this.seq}-${Math.random().toString(36).slice(2, 6)}`, name: `${src.name} (new)`, roadmapId: this.roadmapInfo.id, owner: userId,
       baseVersion: this.currentVersion, now: this.now(), limits: this.config.limits, derivedFrom: src.id, changes,
@@ -568,6 +578,7 @@ export class RoadmapService {
     const at = new Date(this.now()).toISOString();
     const changes = changesBetween(this.baseOf({ baseVersion: this.currentVersion } as ProposalRecord), old.doc).map((c) => ({ ...c, by: userId, at }));
     if (!changes.length) throw new ServiceError('Nothing differs from the current version', 'invalid');
+    this.checkChanges(ev, this.baseOf({ baseVersion: this.currentVersion } as ProposalRecord), changes);
     const p = createProposal({
       id: `p${++this.seq}-${Math.random().toString(36).slice(2, 6)}`, name: `Restore version ${version}`, roadmapId: this.roadmapInfo.id, owner: userId,
       baseVersion: this.currentVersion, now: this.now(), limits: this.config.limits, changes,
@@ -628,7 +639,19 @@ export class RoadmapService {
    */
   private summaryFor(userId: string, p: ProposalRecord): ProposalSummary {
     const actions = Object.fromEntries((Object.keys(ACTION_PERMISSION) as LifecycleAction[]).map((a) => [a, this.whyNot(userId, p.id, a)]));
-    return { ...this.summary(p), actions };
+    const s = this.summary(p);
+    // Only tasks this user may view (L12): no hidden task ids in the counts, picks or pick history.
+    const ev = this.evaluator(userId);
+    const cur = this.versions.get(this.currentVersion)?.doc;
+    let built: RoadmapDocument | undefined;
+    const seen = (id: string) => { const t = cur?.tasks.find((x) => x.id === id) ?? (built ??= this.build(p)).tasks.find((x) => x.id === id); return !t || this.canViewTask(ev, t); };
+    const hiddenPick = new Set((p.picks ?? []).filter((k) => !seen(k.taskId)).map((k) => k.taskId));
+    return {
+      ...s, actions,
+      changedTasks: s.changedTasks.filter(seen),
+      ...(p.picks ? { picks: p.picks.filter((k) => !hiddenPick.has(k.taskId)) } : {}),
+      history: p.history.filter((h) => h.action !== 'pick' || !hiddenPick.has(h.reason?.split(':')[0] ?? '')),
+    };
   }
   /** A Proposal's summary for everyone: its state, counts and deadlines, without the change list. */
   private summary(p: ProposalRecord): ProposalSummary {

@@ -200,6 +200,8 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
     for (const e of out.get(id) ?? []) {
       const sLS = ls.get(e.to), sLF = lf.get(e.to);
       if (sLS === undefined || sLF === undefined) continue;
+      // A summary's start-based links limit when its first subtask starts, not when its subtasks finish.
+      if (isSummary(id) && (e.type === 'SS' || e.type === 'SF')) continue;
       const succMilestone = byId.get(e.to)?.type === 'milestone', meMilestone = t.type === 'milestone';
       let f: DayNum;
       switch (e.type) {

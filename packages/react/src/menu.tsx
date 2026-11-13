@@ -36,7 +36,10 @@ export function ContextMenu({ x, y, items, onClose, label }: { x: number; y: num
   useEffect(() => {
     // The element focused when this opened; focus goes back to it on close.
     const opener = returnTo.current as HTMLElement | null;
-    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) closeRef.current(); };
+    // A press on the button that opened this menu is left to that button, which closes it as a toggle;
+    // closing here first would make that click open it again.
+    const toggle = opener?.closest('[aria-haspopup="menu"]');
+    const away = (e: PointerEvent) => { const n = e.target as Node; if (!ref.current?.contains(n) && !toggle?.contains(n)) closeRef.current(); };
     window.addEventListener('pointerdown', away, true);
     return () => { window.removeEventListener('pointerdown', away, true); opener?.focus?.({ preventScroll: true }); };
   }, []);

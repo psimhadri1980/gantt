@@ -640,7 +640,9 @@ function GanttView(props: CoreProps & {
   const applyZoom = useCallback((z: string) => { startTransition(() => { setZoomState(z); setSettling(true); }); onZoomRef.current?.(z); }, []);
   const setZoom = useCallback((z: string, anchorPx?: number) => {
     const el = chartRef.current, sc = geom.current.scale;
-    if (el && !pendingAnchor.current) {
+    // Only a real change of level moves the scale; an anchor set for the level already showing would never be
+    // used up, and the next zoom would jump back to it.
+    if (el && !pendingAnchor.current && z !== geom.current.zoom) {
       if (anchorPx !== undefined) pendingAnchor.current = { day: (el.scrollLeft + anchorPx) / sc.pxPerDay + sc.origin, px: anchorPx };
       else pendingAnchor.current = zoomAnchor(el, sc, anchorRef.current.selection, anchorRef.current.model, anchorRef.current.today);
     }
@@ -1422,7 +1424,7 @@ function GanttView(props: CoreProps & {
       { label: m.moveLeft, why: i <= 0 ? m.moveLeft : null, run: () => { const n = [...cols]; [n[i - 1], n[i]] = [n[i]!, n[i - 1]!]; setColumns(n); } },
       { label: m.moveRight, why: i >= cols.length - 2 ? m.moveRight : null, run: () => { const n = [...cols]; [n[i + 1], n[i]] = [n[i]!, n[i + 1]!]; setColumns(n); } },
       { label: m.freezeTo, checked: frozen === i + 1, run: () => setColumns(cols, frozen === i + 1 ? 0 : i + 1) },
-      { label: m.hideColumn, why: c.id === 'name' ? m.colName : null, run: () => setColumns(cols.filter((x) => x.id !== c.id), Math.min(frozen, cols.length - 1)) },
+      { label: m.hideColumn, why: c.id === 'name' ? m.colName : null, run: () => setColumns(cols.filter((x) => x.id !== c.id), Math.min(i < frozen ? frozen - 1 : frozen, cols.length - 1)) },
     ];
   };
   const filterValuesOf = (field: string): { value: string; label: string }[] => {
@@ -1497,7 +1499,8 @@ function GanttView(props: CoreProps & {
       const a = rowIndexOf.get(bars.get(l.source)?.row.taskId ?? ''), b = rowIndexOf.get(bars.get(l.target)?.row.taskId ?? '');
       if (a === undefined || b === undefined) continue;
       const b0 = Math.floor(Math.min(a, b) / BLOCK), b1 = Math.floor(Math.max(a, b) / BLOCK);
-      if (b1 - b0 > 1) long.push({ l, b0, b1 }); else byBlock[b0]!.push(l);
+      // A link that crosses blocks is drawn while either end's block is (not only the upper one's).
+      if (b1 > b0) long.push({ l, b0, b1 }); else byBlock[b0]!.push(l);
     }
     return { byBlock, long };
   }, [blocks, data.links, bars, rowIndexOf]);

@@ -38,7 +38,8 @@ export function toMsProject(doc: RoadmapDocument): string {
   const uid = new Map(ordered.map((o, i) => [o.t.id, i + 1]));
   const preds = new Map<string, Link[]>();
   for (const l of doc.links) (preds.get(l.target) ?? preds.set(l.target, []).get(l.target)!).push(l);
-  const dur = (hours: number) => `PT${Math.round(hours)}H0M0S`;
+  // Whole minutes, so fractional hours (1.5 h, or a 7.5-hour day) survive the round trip.
+  const dur = (hours: number) => { const min = Math.round(hours * 60); return `PT${Math.floor(min / 60)}H${min % 60}M0S`; };
   const tasks = ordered.map(({ t, level, wbs }) => {
     const pl = p.byId.get(t.id)!;
     const summary = (kids.get(t.id)?.length ?? 0) > 0 || t.type === 'summary';
@@ -127,8 +128,8 @@ export function fromMsProject(xml: string, base?: Partial<RoadmapDocument>): MsI
     if (!summary && !milestone && durTag !== undefined) {
       const h = hoursOf(durTag, hpd);
       const fmt = tag(r.b, 'DurationFormat');
-      if (fmt === '5' || fmt === '6' || h % hpd !== 0) { t.duration = Math.round(h * 100) / 100; t.durationUnit = 'hour'; }
-      else t.duration = h / hpd;
+      if (fmt === '5' || fmt === '6' || Math.abs(h / hpd - Math.round(h / hpd)) > 1e-6) { t.duration = Math.round(h * 100) / 100; t.durationUnit = 'hour'; }
+      else t.duration = Math.round(h / hpd);
     }
     const pc = tag(r.b, 'PercentComplete'); if (pc && +pc > 0) t.progress = +pc / 100;
     const ct = CONSTRAINT_FROM[+(tag(r.b, 'ConstraintType') ?? 0)];

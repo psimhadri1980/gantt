@@ -235,7 +235,7 @@ function Managed(props: GanttRootProps & { backend: GanttBackend; evaluator: Acc
   let readOnly: string | false = false;
   if (view.kind === 'version') readOnly = m.versionReadOnly;
   else if (view.kind === 'proposal' && proposal) {
-    if (proposal.state === 'Submitted' || proposal.state === 'Reviewed') readOnly = 'The Proposal is locked for review; withdraw it to make changes';
+    if (proposal.state === 'Submitted' || proposal.state === 'Reviewed') readOnly = m.lockedForReview;
     else if (proposal.state !== 'Draft' && proposal.state !== 'Returned') readOnly = m.closedReadOnly(m.state[proposal.state] ?? proposal.state);
     else if (snap && !snap.can['proposal.edit']) readOnly = m.missingPermission('proposal.edit');
   } else if (view.kind === 'current' && snap && !snap.can['proposal.create'] && !editableOwn(snap, backend.userId).length) readOnly = m.missingPermission('proposal.create');
@@ -432,7 +432,7 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
       )}
       {offerBaseline && snap.can['baseline.save'] && snap.current && (
         <form className="gx-pbar-row" aria-label={m.saveBaseline} onSubmit={(e) => { e.preventDefault(); const v = new FormData(e.currentTarget).get('name'); if (typeof v === 'string' && v.trim()) saveBaseline(v.trim()); }}>
-          <label>{m.baselineName} <input className="gx-input" name="name" defaultValue={`Version ${snap.version}`} autoFocus required /></label>
+          <label>{m.baselineName} <input className="gx-input" name="name" defaultValue={m.baselineDefaultName(num(snap.version))} autoFocus required /></label>
           <button className="gx-btn gx-primary" type="submit">{m.saveBaseline}</button>
           <button className="gx-btn" type="button" onClick={() => setOfferBaseline(false)}>{m.cancel}</button>
         </form>
@@ -448,7 +448,7 @@ function ProposalBar({ snap, view, setView, proposal, compare, setCompare, act, 
       {history && proposal && (
         <ol className="gx-history" aria-label={m.history}>
           {proposal.history.map((h, i) => (
-            <li key={i}>{m.historyEntry(h.by, `${h.action}${h.to ? ` → ${m.state[h.to] ?? h.to}` : ''}${h.reason ? ` (${h.reason})` : ''}${h.separationOfDuties !== undefined ? ` · separation of duties ${h.separationOfDuties ? 'enforced' : 'not enforced'}` : ''}`, day(h.at))}</li>
+            <li key={i}>{m.historyEntry(h.by, `${m.historyAction[h.action] ?? h.action}${h.to ? ` → ${m.state[h.to] ?? h.to}` : ''}${h.reason ? ` (${h.reason})` : ''}${h.separationOfDuties !== undefined ? ` · ${m.separationOfDuties(h.separationOfDuties)}` : ''}`, day(h.at))}</li>
           ))}
         </ol>
       )}

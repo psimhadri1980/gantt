@@ -181,7 +181,7 @@ export function RefreshDialog({ preview, choices, setChoices, m, onConfirm, onCa
         </section>
         <section>
           <h3>{m.incomingTitle}</h3>
-          {sorted.length ? <ul className="gx-list gx-incoming">{sorted.map((c) => <li key={c.taskId}>{c.name} · {kind[c.kind]}{c.groups.length && c.kind === 'changed' ? ` (${c.groups.map((g) => groupText(m, g)).join(', ')})` : ''}{c.by ? ` · ${c.by}` : ''}</li>)}</ul>
+          {sorted.length ? <ul className="gx-list gx-incoming">{sorted.map((c) => <li key={c.taskId}>{c.name} · {kind[c.kind]}{c.groups.length > 0 && c.kind === 'changed' ? ` (${c.groups.map((g) => groupText(m, g)).join(', ')})` : ''}{c.by ? ` · ${c.by}` : ''}</li>)}</ul>
             : <p className="gx-muted">{m.incomingNone}</p>}
         </section>
         {(preview.moved.length > 0 || preview.newIssues.length > 0) && <section>
