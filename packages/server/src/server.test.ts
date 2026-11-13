@@ -50,6 +50,9 @@ describe('reference server over HTTP', () => {
     const dave = await as('dave').snapshot();
     expect(dave.current!.tasks.find((t) => t.id === 't2')).not.toHaveProperty('deadline');
   });
+  it('takes the user from the URL only for the event stream (audit 4)', async () => {
+    expect((await fetch(`${base}/roadmap?user=alice`)).status).not.toBe(200);
+  });
   it('pushes stale and concurrent-change events, and refreshes over HTTP (H5, K15–K18)', async () => {
     const seen: string[] = [];
     // Server-sent events, read with fetch (Node has no EventSource).

@@ -33,12 +33,15 @@ export function writeXlsx(rows: string[][], sheet = 'Tasks'): Uint8Array {
   ]);
 }
 
+/** The text of a rich or plain string: its `<t>` runs, without phonetic readings (`<rPh>`) or their settings. */
+const textOf = (xml: string) => unesc([...xml.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''));
+
 /** Reads the first sheet of a workbook as text cells, including shared strings and dates stored as serial numbers. */
 export async function readXlsx(bytes: Uint8Array): Promise<string[][]> {
   const files = await readZip(bytes);
   const dec = new TextDecoder();
   const get = (n: string) => { const f = files.get(n); return f ? dec.decode(f) : ''; };
-  const shared = [...get('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => unesc([...m[1]!.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join('')));
+  const shared = [...get('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => textOf(m[1]!));
   const rels = get('xl/_rels/workbook.xml.rels');
   const firstSheet = /<sheet\b[^>]*r:id="([^"]+)"/.exec(get('xl/workbook.xml'))?.[1];
   const target = firstSheet ? new RegExp(`Id="${firstSheet}"[^>]*Target="([^"]+)"|Target="([^"]+)"[^>]*Id="${firstSheet}"`).exec(rels) : null;
@@ -48,7 +51,7 @@ export async function readXlsx(bytes: Uint8Array): Promise<string[][]> {
   // Which styles are dates (built-in date formats 14–22 and custom ones with d/m/y).
   const styles = get('xl/styles.xml');
   const custom = new Map([...styles.matchAll(/<numFmt numFmtId="(\d+)" formatCode="([^"]*)"/g)].map((m) => [+m[1]!, m[2]!]));
-  const xfs = [...(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)?.[1] ?? '').matchAll(/<xf\b[^>]*?numFmtId="(\d+)"/g)].map((m) => +m[1]!);
+  const xfs = [...(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)?.[1] ?? '').matchAll(/<xf\b([^>]*)>/g)].map((m) => +(/numFmtId="(\d+)"/.exec(m[1]!)?.[1] ?? 0));
   const isDate = (s: number) => { const f = xfs[s]; return f !== undefined && ((f >= 14 && f <= 22) || /[dmy]/i.test(custom.get(f)?.replace(/\[[^\]]*\]|"[^"]*"/g, '') ?? '')); };
   const rows: string[][] = [];
   for (const rm of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
@@ -60,9 +63,10 @@ export async function readXlsx(bytes: Uint8Array): Promise<string[][]> {
       const v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
       let text = '';
       if (t === 's') text = shared[+(v ?? 0)] ?? '';
-      else if (t === 'inlineStr') text = unesc([...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''));
+      else if (t === 'inlineStr') text = textOf(inner);
       else if (t === 'str' || t === 'b') text = unesc(v ?? '');
-      else if (v !== undefined) text = isDate(s) ? new Date(Math.round((+v - 25569) * 86_400_000)).toISOString().slice(0, 10) : v;
+      else if (t === 'd') text = unesc(v ?? '').slice(0, 10);
+      else if (v !== undefined) text = isDate(s) && Number.isFinite(+v) ? new Date(Math.round((+v - 25569) * 86_400_000)).toISOString().slice(0, 10) : v;
       while (row.length < i) row.push('');
       row[i] = text;
     }

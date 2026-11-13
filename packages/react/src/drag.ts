@@ -81,7 +81,8 @@ export class DragController {
   begin(e: PointerEvent | React.PointerEvent, kind: DragKind, id: string, bar: HTMLElement | null): boolean {
     const t = this.h.task(id);
     if (kind !== 'create' && (!t || t.start === undefined || t.end === undefined)) return false;
-    const field = kind === 'progress' ? 'progress' : kind.startsWith('link') ? null : kind === 'create' ? null : 'start';
+    // The field the drag changes: resizing the end changes the duration, moving or resizing the start the start.
+    const field = kind === 'progress' ? 'progress' : kind === 'end' ? 'duration' : kind.startsWith('link') || kind === 'create' ? null : 'start';
     const why = field ? this.h.whyNot(id, field) : null;
     if (why) { this.h.announce(why); return false; }
     const sc = this.h.scale();
@@ -127,7 +128,9 @@ export class DragController {
         const s = cal.nextWorking(a.start + a.delta);
         const dur = cal.workingDaysBetween(a.start, a.end);
         const e = this.h.task(a.id)?.task.type === 'milestone' ? s : cal.endOf(s, dur);
-        a.lane = this.h.laneAt(a.lastY);
+        // Another lane only when the task may be moved there (its parent is a field with its own permission).
+        const lane = this.h.laneAt(a.lastY);
+        a.lane = lane && lane !== this.h.task(a.id)?.task.parent && this.h.whyNot(a.id, 'parent') ? null : lane;
         if (a.bar) a.bar.classList.toggle('gx-drag-lane', !!a.lane && a.lane !== this.h.task(a.id)?.task.parent);
         this.h.tip(a.lastX, a.lastY, this.h.describe(s, e, 'move'));
         this.schedulePreview({ start: fromDay(s) });

@@ -22,6 +22,6 @@ const rulesFile = process.env.GANTT_RULES_FILE ?? new URL('../../mock/src/sample
 const rules: Record<string, AccessRules> = JSON.parse(readFileSync(rulesFile, 'utf8'));
 
 const service = new RoadmapService({ current: loaded.doc, rulesFor: (u) => rules[u] ?? null, separationOfDuties: r.env.separationOfDuties });
-createGanttServer(service, { allowOrigin: process.env.GANTT_ALLOW_ORIGIN ?? '*' }).listen(r.env.port, () => {
+createGanttServer(service, { allowOrigin: process.env.GANTT_ALLOW_ORIGIN }).listen(r.env.port, () => {
   console.log(`Gantt reference server on http://localhost:${r.env.port} (${r.env.environment}); separation of duties ${r.env.separationOfDuties ? 'enforced' : 'NOT enforced'}`);
 });

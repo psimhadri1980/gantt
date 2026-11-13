@@ -98,18 +98,15 @@ export function changesBetween(from: RoadmapDocument, to: RoadmapDocument): Omit
     return { creates, deletes };
   };
   const t = diff('task', from.tasks, to.tasks);
-  // Deletes: only the top of each deleted subtree (its children go with it), before creates (ids may be reused).
+  // Creates parent-first, then updates (so a kept task moves out of a deleted subtree first), then deletes:
+  // only the top of each deleted subtree, since its children go with it.
   const gone = new Set(t.deletes.map((x) => x.id));
-  const linkGone = (l: { source: string; target: string }) => {
-    const deleted = (id: string) => { for (let c: string | null | undefined = id; c; c = from.tasks.find((x) => x.id === c)?.parent) if (gone.has(c)) return true; return false; };
-    return deleted(l.source) || deleted(l.target);
-  };
+  const linkGone = (l: { source: string; target: string }) => gone.has(l.source) || gone.has(l.target);
   const updates = out.splice(0);
-  for (const x of t.deletes) if (!x.parent || !gone.has(x.parent)) out.push({ entity: 'task', op: 'delete', id: x.id });
-  // Creates parent-first.
   const depth = (id: string): number => { let d = 0; for (let p = to.tasks.find((x) => x.id === id)?.parent; p; p = to.tasks.find((x) => x.id === p)?.parent) d++; return d; };
   for (const x of [...t.creates].sort((a, b) => depth(a.id) - depth(b.id))) { const { id, ...fields } = x; out.push({ entity: 'task', op: 'create', id, fields }); }
   out.push(...updates);
+  for (const x of t.deletes) if (!x.parent || !gone.has(x.parent)) out.push({ entity: 'task', op: 'delete', id: x.id });
   const l = diff('link', from.links, to.links);
   for (const x of l.deletes) if (!linkGone(x)) out.push({ entity: 'link', op: 'delete', id: x.id });
   for (const x of l.creates) { const { id, ...fields } = x; out.push({ entity: 'link', op: 'create', id, fields }); }

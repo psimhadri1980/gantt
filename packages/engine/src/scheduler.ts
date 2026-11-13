@@ -98,7 +98,7 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
   const add = (e: Edge) => { edges.push(e); (out.get(e.from) ?? out.set(e.from, []).get(e.from)!).push(e); (inn.get(e.to) ?? inn.set(e.to, []).get(e.to)!).push(e); };
   for (const l of doc.links) {
     if (!byId.has(l.source) || !byId.has(l.target)) continue;
-    const lag = l.lagUnit === 'hour' ? Math.ceil((l.lag ?? 0) / hoursPerDay) : Math.round(l.lag ?? 0);
+    const lag = l.lagUnit === 'hour' ? Math.sign(l.lag ?? 0) * Math.ceil(Math.abs(l.lag ?? 0) / hoursPerDay) /* a part day counts whole, for leads too */ : Math.round(l.lag ?? 0);
     const targets = isSummary(l.target) ? leavesOf(l.target) : [l.target];
     for (const t of targets) add({ from: l.source, to: t, type: l.type, lag, linkId: l.id });
   }
@@ -200,6 +200,8 @@ export function schedule(doc: RoadmapDocument): ScheduleResult {
     for (const e of out.get(id) ?? []) {
       const sLS = ls.get(e.to), sLF = lf.get(e.to);
       if (sLS === undefined || sLF === undefined) continue;
+      // A summary's start-based links limit when its first subtask starts, not when its subtasks finish.
+      if (isSummary(id) && (e.type === 'SS' || e.type === 'SF')) continue;
       const succMilestone = byId.get(e.to)?.type === 'milestone', meMilestone = t.type === 'milestone';
       let f: DayNum;
       switch (e.type) {

@@ -58,3 +58,19 @@ describe('configuration (G1, G2)', () => {
     expect((host.querySelector('.gx-grid-body [role="row"]') as HTMLElement).style.height).toBe('48px');
   });
 });
+
+describe('toolbar menus (audit 5)', () => {
+  it('a second click on the Show button closes its menu', async () => {
+    const host = await render(<Gantt data={base} />);
+    const show = [...host.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Show'))!;
+    // As in a browser: the press lands (and focuses the button) before the click, in separate events.
+    const press = async () => {
+      await act(async () => { show.focus(); show.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+      await act(async () => { show.click(); });
+    };
+    await press();
+    expect(document.querySelectorAll('.gx-menu').length).toBe(1);
+    await press();
+    expect(document.querySelectorAll('.gx-menu').length).toBe(0);
+  });
+});

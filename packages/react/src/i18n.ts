@@ -135,6 +135,11 @@ export interface GanttMessages {
   closedReadOnly: (state: string) => string;
   returnedReason: (reason: string) => string;
   historyEntry: (who: string, action: string, date: string) => string;
+  /** History steps by action, the reason a Proposal under review is read-only, and the default baseline name. */
+  historyAction: Record<'create' | 'change' | 'submit' | 'withdraw' | 'review' | 'approve' | 'return' | 'reject' | 'discard' | 'expire' | 'newFrom' | 'pick' | 'refresh' | 'undoRefresh', string>;
+  separationOfDuties: (enforced: boolean) => string;
+  lockedForReview: string;
+  baselineDefaultName: (version: string) => string;
   // scheduling (Phase 4)
   criticalPath: string;
   scheduleHint: string;
@@ -447,6 +452,14 @@ export const defaultMessages: GanttMessages = {
   closedReadOnly: (state) => `The Proposal is ${state} and cannot be changed`,
   returnedReason: (r) => `Returned: ${r}`,
   historyEntry: (who, action, date) => `${date} · ${who} · ${action}`,
+  historyAction: {
+    create: 'created', change: 'changed', submit: 'submitted', withdraw: 'withdrew', review: 'marked reviewed', approve: 'approved',
+    return: 'returned', reject: 'rejected', discard: 'discarded', expire: 'expired', newFrom: 'created from another Proposal',
+    pick: 'picked a version', refresh: 'refreshed', undoRefresh: 'undid the refresh',
+  },
+  separationOfDuties: (on) => `separation of duties ${on ? 'enforced' : 'not enforced'}`,
+  lockedForReview: 'The Proposal is locked for review; withdraw it to make changes',
+  baselineDefaultName: (v) => `Version ${v}`,
   criticalPath: 'Critical path',
   scheduleHint: 'Apply the calculated dates (successors after their predecessors)',
   scheduleUpToDate: 'The schedule is up to date.',
@@ -638,6 +651,7 @@ export function mergeMessages(over?: Partial<GanttMessages>): GanttMessages {
     state: { ...defaultMessages.state, ...over.state },
     phaseName: { ...defaultMessages.phaseName, ...over.phaseName },
     action: { ...defaultMessages.action, ...over.action },
+    historyAction: { ...defaultMessages.historyAction, ...over.historyAction },
     groupName: { ...defaultMessages.groupName, ...over.groupName },
     progressStatus: { ...defaultMessages.progressStatus, ...over.progressStatus },
     exportAs: { ...defaultMessages.exportAs, ...over.exportAs },

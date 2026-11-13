@@ -105,7 +105,16 @@ export function applyDataOperation(doc: RoadmapDocument, op: DataOperation): { d
       const removedLinks = links.filter((l) => gone.has(l.source) || gone.has(l.target));
       tasks = tasks.filter((x) => !gone.has(x.id));
       links = links.filter((l) => !gone.has(l.source) && !gone.has(l.target));
-      inverse = [...removedTasks.map(({ task, index }): DataOperation => ({ type: 'task.create', task, index })), ...removedLinks.map((link): DataOperation => ({ type: 'link.create', link }))];
+      // Re-created in position order; a task listed before its own parent gets its parent back once that exists.
+      const at = new Map(removedTasks.map(({ task, index }) => [task.id, index]));
+      const reparent: DataOperation[] = [];
+      const creates = removedTasks.map(({ task, index }): DataOperation => {
+        const pi = task.parent ? at.get(task.parent) : undefined;
+        if (pi === undefined || pi < index) return { type: 'task.create', task, index };
+        reparent.push({ type: 'task.update', id: task.id, fields: { parent: task.parent } });
+        return { type: 'task.create', task: { ...task, parent: null }, index };
+      });
+      inverse = [...creates, ...reparent, ...removedLinks.map((link): DataOperation => ({ type: 'link.create', link }))];
       break;
     }
     case 'link.create':
