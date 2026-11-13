@@ -32,7 +32,7 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run lint
       # The API reference in docs/api is generated from the sources; fail if a change was not regenerated.
-      - run: ppnpm run docs:api --check
+      - run: pnpm run docs:api --check
       - run: pnpm test
 
   security:

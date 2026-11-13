@@ -116,7 +116,7 @@ roadmap never blocks scrolling.
 | `pnpm run docs:api` | Regenerates [docs/api](docs/api) from the sources (`-- --check` fails when out of date) |
 | `pnpm run bench` | Performance benchmark of the 10,000-task page against the plan's budgets |
 | `pnpm run verify` | Boundaries, types, unit tests and end-to-end tests |
-| `ppnpm run generate --tasks 50000` | Writes a generated roadmap to standard output |
+| `pnpm run generate --tasks 50000` | Writes a generated roadmap to standard output |
 
 ## Continuous integration and security
 

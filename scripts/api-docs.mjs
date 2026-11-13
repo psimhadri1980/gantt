@@ -1,6 +1,6 @@
 // API reference generated from the TypeScript sources (J5).
 //   pnpm run docs:api            writes docs/api/<package>.md for every package
-//   ppnpm run docs:api --check exits 1 if any file is out of date (run in CI, so the reference never drifts)
+//   pnpm run docs:api --check exits 1 if any file is out of date (run in CI, so the reference never drifts)
 //
 // For each package, the public API is what its src/index.ts exports. The TypeScript compiler resolves every
 // export (including `export *` and re-exports) to its declaration; the reference lists each one with its kind,
