@@ -130,8 +130,8 @@ GitHub Actions ([.github/workflows](.github/workflows)) run on every pull reques
 - **Dependency review**: a pull request that adds a dependency with a known vulnerability fails.
 - **Dependabot**: weekly update pull requests for npm packages and actions.
 
-`pnpm-workspace.yaml` pins a patched `minimatch` for typescript-eslint through `overrides`, until typescript-eslint
-depends on one itself. It also sets the supply-chain policies every install checks: no package whose provenance
+`pnpm-workspace.yaml` pins a patched `minimatch` (GHSA-g3hv-75wg-m249) for every package through `overrides`,
+until eslint and typescript-eslint depend on one themselves. It also sets the supply-chain policies every install checks: no package whose provenance
 was downgraded, and no version younger than a day.
 
 The server in `packages/server` trusts the user id sent in the `x-gantt-user` header: it is a reference for the
