@@ -1,6 +1,6 @@
 // Automated Phase 1 performance benchmark.
-//   npm run bench                 (this machine, no throttling)
-//   npm run bench -- --throttle 4 (CPU slowed 4x to approximate a mid-range laptop)
+//   pnpm run bench                 (this machine, no throttling)
+//   ppnpm run bench --throttle 4 (CPU slowed 4x to approximate a mid-range laptop)
 // Builds the demo in production mode, serves it, drives system Chrome headless, checks the budget, exits 1 on a miss.
 import { build, preview } from 'vite';
 import { chromium } from 'playwright-core';

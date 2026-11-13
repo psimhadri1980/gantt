@@ -3,7 +3,7 @@
 The Gantt rendered on the server with `react-dom/server` and hydrated in the browser.
 
 ```bash
-npm start -w @gantt/ssr-example
+pnpm --filter @gantt/ssr-example start
 ```
 
 Opens at http://127.0.0.1:5185.

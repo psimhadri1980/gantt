@@ -1,5 +1,5 @@
 // Server rendering example (J2): a plain Node HTTP server with Vite as middleware.
-//   npm start -w @gantt/ssr-example      then open http://127.0.0.1:5185
+//   pnpm --filter @gantt/ssr-example start      then open http://127.0.0.1:5185
 // Each request renders <App /> with react-dom/server and returns full HTML; the browser then hydrates it.
 // Next.js works the same way: render <Gantt ssr … /> from a client component ('use client'), and import
 // '@gantt/react' as usual. The `ssr` prop is what makes the first render synchronous on both sides.

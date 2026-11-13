@@ -7,10 +7,11 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@gantt/react": "*",
-    "@gantt/access": "*",
-    "@gantt/mock": "*",
+    "@gantt/react": "workspace:*",
+    "@gantt/access": "workspace:*",
+    "@gantt/mock": "workspace:*",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "@gantt/contract": "workspace:*"
   }
 }

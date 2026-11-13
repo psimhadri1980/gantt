@@ -1,4 +1,4 @@
-// Static checks (run with `npm run lint`, and in CI). TypeScript's own checks run separately (`npm run typecheck`);
+// Static checks (run with `pnpm run lint`, and in CI). TypeScript's own checks run separately (`pnpm run typecheck`);
 // ESLint adds the rules the compiler does not have: correctness patterns from typescript-eslint, React's rules
 // of hooks, and a few project rules. Formatting is not linted.
 import js from '@eslint/js';

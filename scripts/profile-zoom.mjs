@@ -1,4 +1,4 @@
-// CPU profile of the zoom phase only (lanes sample, 4x throttle). Build first: GANTT_NO_MINIFY=1 npx vite build (in apps/demo).
+// CPU profile of the zoom phase only (lanes sample, 4x throttle). Build first: GANTT_NO_MINIFY=1 pnpm exec vite build (in apps/demo).
 import { preview } from 'vite';
 import { chromium } from 'playwright-core';
 const root = new URL('../apps/demo/', import.meta.url).pathname;

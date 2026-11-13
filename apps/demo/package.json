@@ -8,10 +8,11 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@gantt/react": "*",
-    "@gantt/mock": "*",
+    "@gantt/react": "workspace:*",
+    "@gantt/mock": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@gantt/service": "*"
+    "@gantt/service": "workspace:*",
+    "@gantt/contract": "workspace:*"
   }
 }

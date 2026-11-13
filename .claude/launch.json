@@ -1,1 +1,1 @@
-{ "version": "0.0.1", "configurations": [ { "name": "demo", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5180 } ] }
+{ "version": "0.0.1", "configurations": [ { "name": "demo", "runtimeExecutable": "pnpm", "runtimeArgs": ["run", "dev"], "port": 5180 } ] }

@@ -1,4 +1,5 @@
 # Weekly pull requests for outdated npm packages and GitHub Actions; security updates arrive as soon as published.
+# The `npm` ecosystem also covers pnpm: Dependabot reads and updates pnpm-lock.yaml.
 version: 2
 updates:
   - package-ecosystem: npm

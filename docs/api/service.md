@@ -2,7 +2,7 @@
 
 The roadmap service (Current, approved versions and Proposals, with access checks) and the in-memory and HTTP backends the React component uses.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 15 exports.
 

@@ -9,5 +9,5 @@ Data for the demo, tests and benchmarks.
 - `loadMock(text)`: parses and validates a mock file like any import, adding full access when it has no rules.
 
 ```bash
-npm run generate -- --tasks 10000 --links 0.5 --depth 3 --lanes 0 > big.json
+ppnpm run generate --tasks 10000 --links 0.5 --depth 3 --lanes 0 > big.json
 ```
