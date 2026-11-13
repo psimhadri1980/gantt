@@ -21,6 +21,8 @@ const users: Record<string, AccessRules> = {
   copier: { subject: { id: 'copier' }, rules: [{ effect: 'allow', permissions: ['view', 'view.history', 'proposal.create', 'proposal.edit', 'proposal.viewOthers', 'task.modify.progress'] }] },
   // Sees every Proposal, but not task b.
   noB: { subject: { id: 'noB' }, rules: [{ effect: 'allow', permissions: ['view', 'proposal.viewOthers'] }, { effect: 'deny', permissions: ['view'], scope: { tasks: { ids: ['b'] } } }] },
+  // May approve, but not view task b.
+  approverNoB: { subject: { id: 'approverNoB' }, rules: [{ effect: 'allow', permissions: [...ALL] }, { effect: 'deny', permissions: ['view'], scope: { tasks: { ids: ['b'] } } }] },
 };
 const make = () => new RoadmapService({ current, rulesFor: (u) => users[u] ?? null, now: () => Date.parse('2026-11-02T09:00:00Z') });
 const code = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as ServiceError).code; } return 'ok'; };
@@ -50,5 +52,14 @@ describe('review fixes: service permissions', () => {
     expect(mine.changedTasks).toEqual(['a', 'b']);
     const theirs = svc.snapshot('noB').proposals.find((x) => x.id === p.id)!;
     expect(theirs.changedTasks).toEqual(['a']);
+  });
+  it('action responses do not list tasks the user may not view (audit 1)', () => {
+    const svc = make();
+    const p = svc.change('alice', null, [
+      { entity: 'task', op: 'update', id: 'a', fields: { progress: 0.5 } },
+      { entity: 'task', op: 'update', id: 'b', fields: { progress: 0.5 } },
+    ]);
+    svc.act('alice', p.id, 'submit');
+    expect(svc.act('approverNoB', p.id, 'approve').changedTasks).toEqual(['a']);
   });
 });

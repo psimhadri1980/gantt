@@ -301,7 +301,7 @@ export class RoadmapService {
         this.emit({ type: 'concurrentChange', proposal: this.summary(other), actor: userId, taskIds: par.filter((o) => o.proposalId === pid).map((o) => o.taskId), parallel: true });
       }
     }
-    return this.summary(rec.proposal);
+    return this.summaryFor(userId, rec.proposal);
   }
 
   /** A lifecycle action, guarded by its permission (K2) and the state table; Approve writes Current. */
@@ -337,12 +337,12 @@ export class RoadmapService {
         const overlapping = refreshOverlaps(this.baseOf(other), doc, other).map((o) => o.taskId);
         this.emit({ type: 'proposalStale', proposal: this.summary(other), approvedBy: userId, at: new Date(this.now()).toISOString(), newVersion: version, changedTasks, overlapping });
       }
-      return this.summary(next);
+      return this.summaryFor(userId, next);
     }
     this.proposals.set(id, next);
     const type = ({ submit: 'proposalSubmitted', withdraw: 'proposalWithdrawn', review: 'proposalReviewed', return: 'proposalReturned', reject: 'proposalRejected', discard: 'proposalDiscarded' } as const)[action];
     this.emit({ type, proposal: this.summary(next), actor: userId, reason });
-    return this.summary(next);
+    return this.summaryFor(userId, next);
   }
 
   /** Why an action is not possible for this user now, or null. Mirrors act() for explained controls (K2b, F14). */
@@ -425,13 +425,13 @@ export class RoadmapService {
     const at = new Date(this.now()).toISOString();
     const next: ProposalRecord = {
       ...p, picks: [...(p.picks ?? []), { taskId, keep, groups: c.groups, by: userId, at, seq: p.changes.length }],
-      history: [...p.history, { at, by: userId, action: 'pick', reason: `${taskId}: kept ${keep}'s version` }],
+      history: [...p.history, { at, by: userId, action: 'pick', taskId, reason: `${taskId}: kept ${keep}'s version` }],
     };
     const applied = applyChanges(this.baseOf(next), effectiveChanges(next));
     if (!applied.ok) throw new ServiceError(`That version no longer applies: ${applied.reason}`, 'conflict');
     this.proposals.set(id, next);
     this.emit({ type: 'proposalChanged', proposal: this.summary(next), actor: userId });
-    return this.summary(next);
+    return this.summaryFor(userId, next);
   }
 
   /** What refreshing the Proposal onto the newest Current would do, with the choices so far (K16, K17). */
@@ -482,7 +482,7 @@ export class RoadmapService {
     if (!check.ok) throw new ServiceError(`The refresh does not apply: ${check.reason}`, 'conflict');
     this.proposals.set(id, next);
     this.emit({ type: 'proposalRefreshed', proposal: this.summary(next), actor: userId, fromVersion: p.baseVersion, toVersion: this.currentVersion });
-    return this.summary(next);
+    return this.summaryFor(userId, next);
   }
 
   /** Undoes the last refresh while nothing else has happened since (K17). */
@@ -500,7 +500,7 @@ export class RoadmapService {
     };
     this.proposals.set(id, next);
     this.emit({ type: 'proposalChanged', proposal: this.summary(next), actor: userId });
-    return this.summary(next);
+    return this.summaryFor(userId, next);
   }
 
   /**
@@ -560,7 +560,7 @@ export class RoadmapService {
     if (!applied.ok) throw new ServiceError(`Its changes do not apply to the newest Current: ${applied.reason}`, 'conflict');
     this.proposals.set(p.id, p);
     this.emit({ type: 'proposalCreated', proposal: this.summary(p), actor: userId });
-    return this.summary(p);
+    return this.summaryFor(userId, p);
   }
 
   /**
@@ -588,7 +588,7 @@ export class RoadmapService {
     if (!applied.ok) throw new ServiceError(`Version ${version} cannot be restored: ${applied.reason}`, 'conflict');
     this.proposals.set(p.id, p);
     this.emit({ type: 'proposalCreated', proposal: this.summary(p), actor: userId });
-    return this.summary(p);
+    return this.summaryFor(userId, p);
   }
 
   /** Moves the clocks: expires Proposals whose phase ran out and warns before it does (K2e, K2f). */
@@ -642,15 +642,15 @@ export class RoadmapService {
     const s = this.summary(p);
     // Only tasks this user may view (L12): no hidden task ids in the counts, picks or pick history.
     const ev = this.evaluator(userId);
-    const cur = this.versions.get(this.currentVersion)?.doc;
-    let built: RoadmapDocument | undefined;
-    const seen = (id: string) => { const t = cur?.tasks.find((x) => x.id === id) ?? (built ??= this.build(p)).tasks.find((x) => x.id === id); return !t || this.canViewTask(ev, t); };
+    const cur = new Map(this.versions.get(this.currentVersion)?.doc.tasks.map((t) => [t.id, t]));
+    let built: Map<string, Task> | undefined;
+    const seen = (id: string) => { const t = cur.get(id) ?? (built ??= new Map(this.build(p).tasks.map((x) => [x.id, x]))).get(id); return !t || this.canViewTask(ev, t); };
     const hiddenPick = new Set((p.picks ?? []).filter((k) => !seen(k.taskId)).map((k) => k.taskId));
     return {
       ...s, actions,
       changedTasks: s.changedTasks.filter(seen),
       ...(p.picks ? { picks: p.picks.filter((k) => !hiddenPick.has(k.taskId)) } : {}),
-      history: p.history.filter((h) => h.action !== 'pick' || !hiddenPick.has(h.reason?.split(':')[0] ?? '')),
+      history: p.history.filter((h) => !h.taskId || !hiddenPick.has(h.taskId)),
     };
   }
   /** A Proposal's summary for everyone: its state, counts and deadlines, without the change list. */

@@ -39,6 +39,8 @@ export interface HistoryEntry {
   separationOfDuties?: boolean;
   /** For changes: how many were recorded. */
   count?: number;
+  /** For picks: the task picked. */
+  taskId?: string;
 }
 
 /**

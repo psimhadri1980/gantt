@@ -17,3 +17,13 @@ describe('review fixes: summary start links', () => {
     expect(r.tasks.get('a')!.slack).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('review fixes: hour leads (audit 6)', () => {
+  it('a lead shorter than a day still overlaps by a day', () => {
+    const r = schedule(doc([
+      { id: 'a', name: 'A', type: 'task', parent: null, start: '2026-11-02', duration: 3 },
+      { id: 'b', name: 'B', type: 'task', parent: null, start: '2026-11-02', duration: 1 },
+    ], [{ id: 'l', source: 'a', target: 'b', type: 'FS', lag: -4, lagUnit: 'hour' }]));
+    expect(r.tasks.get('b')!.start).toBe(r.tasks.get('a')!.end);
+  });
+});

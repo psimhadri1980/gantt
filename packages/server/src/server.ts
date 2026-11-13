@@ -19,7 +19,8 @@ export function createGanttServer(service: RoadmapService, opts: { allowOrigin?:
     cors(res, opts.allowOrigin);
     if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
     const url = new URL(req.url ?? '/', 'http://local');
-    const user = (req.headers['x-gantt-user'] as string | undefined) ?? url.searchParams.get('user') ?? '';
+    // shortcut: `?user=` only for /events, since EventSource cannot send headers; a host's sign-in must still front it.
+    const user = (req.headers['x-gantt-user'] as string | undefined) ?? (url.pathname === '/events' ? url.searchParams.get('user') : null) ?? '';
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     try {
       if (!user) throw new ServiceError('No user', 'noAccess');

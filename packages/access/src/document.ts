@@ -57,19 +57,21 @@ export function filterDocument<D extends DocLike>(doc: D, ev: AccessEvaluator): 
 /** A change to a roadmap, in the shape of contract ProposalChange. */
 export interface ChangeLike { entity: string; op: 'create' | 'update' | 'delete'; id: string; fields?: Record<string, unknown> }
 
+const CREATE_BASICS = new Set(['name', 'type', 'parent', 'order']);
 const DATE_FIELDS = new Set(['start', 'end', 'duration', 'durationUnit', 'deadline']);
 
 /** The permissions a change needs, each with the field it applies to (L2). */
 export function permissionsForChange(c: ChangeLike): { permission: Permission; field?: string }[] {
   switch (c.entity) {
     case 'task':
-      if (c.op === 'create') return [{ permission: 'task.create' }];
       if (c.op === 'delete') return [{ permission: 'task.delete' }];
-      return Object.keys(c.fields ?? {}).map((f) => ({
+      // A create also needs each field's own permission, except what every new task has (L2).
+      return [...(c.op === 'create' ? [{ permission: 'task.create' as Permission }] : []), ...Object.keys(c.fields ?? {})
+        .filter((f) => c.op !== 'create' || !CREATE_BASICS.has(f)).map((f) => ({
         field: f,
         permission: DATE_FIELDS.has(f) ? 'task.modify.dates' : f === 'progress' ? 'task.modify.progress' : f === 'constraint' ? 'constraint.edit'
           : f === 'parent' ? 'task.reorder' : f === 'resources' ? 'resource.assign' : 'task.modify.fields',
-      }));
+      } as { permission: Permission; field?: string }))];
     case 'link': return [{ permission: c.op === 'create' ? 'link.create' : c.op === 'delete' ? 'link.delete' : 'link.modify' }];
     case 'calendar': return [{ permission: 'calendar.edit' }];
     case 'resource': return [{ permission: 'resource.edit' }];

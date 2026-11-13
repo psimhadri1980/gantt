@@ -108,7 +108,8 @@ export class AccessEvaluator {
       if (t.types && !t.types.includes(k.type ?? 'task')) return false;
       if (t.owners && !(k.owner && (t.owners.includes(k.owner) || (t.owners.includes('$self') && k.owner === this.subject.id)))) return false;
       if (t.kinds && !(k.kind && t.kinds.includes(k.kind))) return false;
-      if (t.groups && !(k.group && t.groups.includes(k.group))) return false;
+      // Tasks carry no group yet, so a group-scoped rule fails closed: a deny covers every task, an allow none.
+      if (t.groups && !(k.group && t.groups.includes(k.group)) && !deny) return false;
     }
     if (s.proposals && ctx.proposal) {
       if (s.proposals === 'own' && ctx.proposal.owner !== this.subject.id) return false;
