@@ -1,5 +1,5 @@
 // Reference server entry point.
-//   GANTT_ENABLE_MOCK_DATA=true GANTT_ENFORCE_SEPARATION_OF_DUTIES=false npm start -w @gantt/server
+//   GANTT_ENABLE_MOCK_DATA=true GANTT_ENFORCE_SEPARATION_OF_DUTIES=false pnpm --filter @gantt/server start
 import { readFileSync } from 'node:fs';
 import { RoadmapService } from '@gantt/service';
 import { loadMock } from '@gantt/mock';

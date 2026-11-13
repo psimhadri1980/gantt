@@ -4,9 +4,10 @@
   "type": "module",
   "description": "Small, tested examples of keeping the Gantt's roadmap in application state (J3).",
   "dependencies": {
-    "@gantt/react": "*",
-    "@gantt/contract": "*",
-    "@gantt/access": "*",
-    "react": "^19.1.0"
+    "@gantt/react": "workspace:*",
+    "@gantt/contract": "workspace:*",
+    "@gantt/access": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   }
 }

@@ -32,15 +32,15 @@ the codes in comments (D1, K7, L12 …) refer to entries in that plan.
 
 ## Quick start
 
-Requirements: Node.js 24 (the sources are TypeScript run directly, without a build step) and Google Chrome or
-Chromium for the end-to-end tests.
+Requirements: Node.js 24 (the sources are TypeScript run directly, without a build step), pnpm 12 (the version in
+`package.json` `packageManager`; `corepack enable` installs it) and Google Chrome or Chromium for the end-to-end tests.
 
 ```bash
-npm install
+pnpm install
 ```
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 The demo opens at http://127.0.0.1:5180. Use `?sample=` to pick a sample: `small`, `large` (10,000 tasks),
@@ -79,7 +79,7 @@ list of props, operations and types is in the generated [API reference](docs/api
 
 ## Repository layout
 
-npm workspaces; every package is TypeScript source with `.ts` imports, used directly by Vite, Vitest and Node.
+pnpm workspace (`pnpm-workspace.yaml`); every package is TypeScript source with `.ts` imports, used directly by Vite, Vitest and Node.
 
 | Package | Purpose |
 | --- | --- |
@@ -97,7 +97,7 @@ npm workspaces; every package is TypeScript source with `.ts` imports, used dire
 | [apps/ssr](apps/ssr) | Server rendering example |
 | [apps/examples](apps/examples) | State-management examples |
 
-Only `packages/react` and the apps use React; `npm run check:boundaries` keeps it that way, so the engine,
+Only `packages/react` and the apps use React; `pnpm run check:boundaries` keeps it that way, so the engine,
 state, access and Proposal logic can run anywhere (a worker, a server, a test).
 
 The engine runs in a Web Worker: the main thread only builds indexes and renders, so placing a large
@@ -107,30 +107,32 @@ roadmap never blocks scrolling.
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Demo with hot reload |
-| `npm test` | Unit and component tests (Vitest; jsdom for React) |
-| `npm run e2e` | Builds the demo and drives Chrome headless through every feature; `E2E_ONLY=regex` runs a subset |
-| `npm run typecheck` | TypeScript, strict (no unused names, no implicit returns, checked index access) |
-| `npm run lint` | ESLint with typescript-eslint and the rules of hooks; no warnings allowed |
-| `npm run check:boundaries` | Fails if a framework-free package imports React |
-| `npm run docs:api` | Regenerates [docs/api](docs/api) from the sources (`-- --check` fails when out of date) |
-| `npm run bench` | Performance benchmark of the 10,000-task page against the plan's budgets |
-| `npm run verify` | Boundaries, types, unit tests and end-to-end tests |
-| `npm run generate -- --tasks 50000` | Writes a generated roadmap to standard output |
+| `pnpm run dev` | Demo with hot reload |
+| `pnpm test` | Unit and component tests (Vitest; jsdom for React) |
+| `pnpm run e2e` | Builds the demo and drives Chrome headless through every feature; `E2E_ONLY=regex` runs a subset |
+| `pnpm run typecheck` | TypeScript, strict (no unused names, no implicit returns, checked index access) |
+| `pnpm run lint` | ESLint with typescript-eslint and the rules of hooks; no warnings allowed |
+| `pnpm run check:boundaries` | Fails if a framework-free package imports React |
+| `pnpm run docs:api` | Regenerates [docs/api](docs/api) from the sources (`-- --check` fails when out of date) |
+| `pnpm run bench` | Performance benchmark of the 10,000-task page against the plan's budgets |
+| `pnpm run verify` | Boundaries, types, unit tests and end-to-end tests |
+| `pnpm run generate --tasks 50000` | Writes a generated roadmap to standard output |
 
 ## Continuous integration and security
 
 GitHub Actions ([.github/workflows](.github/workflows)) run on every pull request and every push to `main`:
 
 - **CI**: boundaries, typecheck, lint, API-reference check and unit tests; the end-to-end suite in Chrome
-  (a failed test is retried once on CI and reported as such); and a dependency audit (`npm audit` failing on
-  moderate issues in runtime dependencies and high issues anywhere, plus registry signature verification).
+  (a failed test is retried once on CI and reported as such); and a dependency audit (`pnpm audit` failing on
+  moderate issues in runtime dependencies and high issues anywhere, plus the lockfile checked against the
+  supply-chain policies in `pnpm-workspace.yaml`).
 - **CodeQL**: static security analysis with the extended query set, also weekly.
 - **Dependency review**: a pull request that adds a dependency with a known vulnerability fails.
 - **Dependabot**: weekly update pull requests for npm packages and actions.
 
-`package.json` pins a patched `minimatch` for typescript-eslint through `overrides`, until typescript-eslint
-depends on one itself.
+`pnpm-workspace.yaml` pins a patched `minimatch` (GHSA-g3hv-75wg-m249) for every package through `overrides`,
+until eslint and typescript-eslint depend on one themselves. It also sets the supply-chain policies every install checks: no package whose provenance
+was downgraded, and no version younger than a day.
 
 The server in `packages/server` trusts the user id sent in the `x-gantt-user` header: it is a reference for the
 API and the tests, not an authentication layer. A deployment must put real authentication in front of it.

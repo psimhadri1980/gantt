@@ -1,5 +1,5 @@
 // Phase 1 acceptance checks in a real browser (plan section 2, Phase 1 "Done when").
-//   npm run e2e
+//   pnpm run e2e
 // Builds the demo, serves it, drives system Chrome headless. Exits 1 on any failure.
 import { build, preview } from 'vite';
 import { chromium } from 'playwright-core';

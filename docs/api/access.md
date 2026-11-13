@@ -2,7 +2,7 @@
 
 Access control: rules, the permission evaluator, per-user filtering of a roadmap, and checks of individual changes.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 17 exports.
 

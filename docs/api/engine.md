@@ -2,7 +2,7 @@
 
 Scheduling and placement without UI: working calendars, the scheduler and critical path, bar placement, resource load and levelling, baselines and progress tracking.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 37 exports.
 

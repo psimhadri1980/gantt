@@ -7,13 +7,13 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@gantt/state": "*",
-    "@gantt/contract": "*",
-    "@gantt/access": "*",
-    "@gantt/service": "*",
-    "@gantt/proposals": "*",
-    "@gantt/engine": "*",
-    "@gantt/interchange": "*"
+    "@gantt/state": "workspace:*",
+    "@gantt/contract": "workspace:*",
+    "@gantt/access": "workspace:*",
+    "@gantt/service": "workspace:*",
+    "@gantt/proposals": "workspace:*",
+    "@gantt/engine": "workspace:*",
+    "@gantt/interchange": "workspace:*"
   },
   "peerDependencies": {
     "react": "^18.2.0 || ^19.0.0",

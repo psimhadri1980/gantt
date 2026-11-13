@@ -2,7 +2,7 @@
 
 The roadmap document format shared by every package: TypeScript types, JSON Schema and validation.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 24 exports.
 

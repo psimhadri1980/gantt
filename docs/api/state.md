@@ -2,7 +2,7 @@
 
 Framework-free view state: row layout, time scale, selection, the operation pipeline with undo, tree edits, and sorting, filtering and grouping.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 66 exports.
 

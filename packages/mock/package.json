@@ -7,8 +7,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@gantt/contract": "*",
-    "@gantt/engine": "*",
-    "@gantt/access": "*"
+    "@gantt/contract": "workspace:*",
+    "@gantt/engine": "workspace:*",
+    "@gantt/access": "workspace:*"
   }
 }

@@ -2,7 +2,7 @@
 
 Import and export: CSV, Excel (.xlsx) and Microsoft Project XML, with no third-party libraries.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 21 exports.
 

@@ -2,7 +2,7 @@
 
 Sample roadmaps, a generator for large ones, and the validating loader for mock files.
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 6 exports.
 

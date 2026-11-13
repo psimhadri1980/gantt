@@ -2,17 +2,14 @@
   "name": "gantt-workspace",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "packageManager": "pnpm@12.16.1",
   "scripts": {
-    "dev": "npm run dev -w @gantt/demo",
+    "dev": "pnpm --filter @gantt/demo dev",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "generate": "node --experimental-strip-types packages/mock/src/cli.ts",
-    "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run e2e",
+    "verify": "pnpm run check:boundaries && pnpm run typecheck && pnpm test && pnpm run e2e",
     "bench": "node scripts/bench.mjs",
     "e2e": "node scripts/e2e.mjs",
     "docs:api": "node scripts/api-docs.mjs",
@@ -36,10 +33,5 @@
     "typescript-eslint": "^8.72.2",
     "vite": "^8.3.7",
     "vitest": "^5.1.0"
-  },
-  "overrides": {
-    "@typescript-eslint/typescript-estree": {
-      "minimatch": "^11.0.8"
-    }
   }
 }

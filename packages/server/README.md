@@ -3,7 +3,7 @@
 A reference HTTP server for `RoadmapService`: the API `httpBackend` talks to.
 
 ```bash
-GANTT_ENABLE_MOCK_DATA=true npm start -w @gantt/server
+GANTT_ENABLE_MOCK_DATA=true pnpm --filter @gantt/server start
 ```
 
 It listens on port 8787 (`PORT`) and serves the small sample with the users in `mock/src/samples/roles.json`;

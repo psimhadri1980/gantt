@@ -1,6 +1,6 @@
 // API reference generated from the TypeScript sources (J5).
-//   npm run docs:api            writes docs/api/<package>.md for every package
-//   npm run docs:api -- --check exits 1 if any file is out of date (run in CI, so the reference never drifts)
+//   pnpm run docs:api            writes docs/api/<package>.md for every package
+//   pnpm run docs:api --check exits 1 if any file is out of date (run in CI, so the reference never drifts)
 //
 // For each package, the public API is what its src/index.ts exports. The TypeScript compiler resolves every
 // export (including `export *` and re-exports) to its declaration; the reference lists each one with its kind,
@@ -73,13 +73,13 @@ function docOf(d, symbol) {
 
 let stale = 0;
 if (!check) mkdirSync(outDir, { recursive: true });
-const index = ['# API reference', '', 'Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.', ''];
+const index = ['# API reference', '', 'Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.', ''];
 for (const [i, pkg] of packages.entries()) {
   const sf = program.getSourceFile(entries[i]);
   const moduleSymbol = checker.getSymbolAtLocation(sf);
   const exports = moduleSymbol ? checker.getExportsOfModule(moduleSymbol) : [];
   const pkgJson = JSON.parse(readFileSync(join(root, 'packages', pkg, 'package.json'), 'utf8'));
-  const lines = [`# ${pkgJson.name}`, '', pkgJson.description ?? '', '', 'Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.', ''];
+  const lines = [`# ${pkgJson.name}`, '', pkgJson.description ?? '', '', 'Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.', ''];
   const items = [];
   for (const ex of exports) {
     const sym = ex.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(ex) : ex;
@@ -106,5 +106,5 @@ const indexText = index.join('\n') + '\n';
 const indexFile = join(outDir, 'README.md');
 if (check) { if (!existsSync(indexFile) || readFileSync(indexFile, 'utf8') !== indexText) { console.error('out of date: docs/api/README.md'); stale++; } }
 else writeFileSync(indexFile, indexText);
-if (check && stale) { console.error('Run `npm run docs:api` and commit the result.'); process.exit(1); }
+if (check && stale) { console.error('Run `pnpm run docs:api` and commit the result.'); process.exit(1); }
 console.log(check ? 'API reference is up to date.' : `Wrote docs/api for ${packages.length} packages.`);

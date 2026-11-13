@@ -1,5 +1,5 @@
 
-// npm run generate -- --tasks 10000 --links 0.5 --depth 3 --lanes 0 > big.json
+// pnpm run generate --tasks 10000 --links 0.5 --depth 3 --lanes 0 > big.json
 import { generate } from './generate.ts';
 /** Reads a numeric `--name value` command-line option, or the default. */
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? Number(process.argv[i + 1]) : d; };

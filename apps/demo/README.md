@@ -3,7 +3,7 @@
 Every sample and option of the Gantt on one page.
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Opens at http://127.0.0.1:5180. The toolbar picks the sample (`?sample=` in the URL), theme, language
@@ -11,5 +11,5 @@ Opens at http://127.0.0.1:5180. The toolbar picks the sample (`?sample=` in the 
 failing saves and host templates. The `proposals` sample runs the review workflow with several users and a clock
 that can be moved forward to test deadlines.
 
-`bench.html` is the 10,000-task benchmark page that `npm run bench` drives; the end-to-end tests
-(`npm run e2e`) run against a production build of this app.
+`bench.html` is the 10,000-task benchmark page that `pnpm run bench` drives; the end-to-end tests
+(`pnpm run e2e`) run against a production build of this app.

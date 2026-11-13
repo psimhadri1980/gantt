@@ -1,0 +1,16 @@
+# The workspace: every package and app. Packages refer to each other with `workspace:*`, so they
+# always resolve to the source in this repository, never to a registry.
+packages:
+  - packages/*
+  - apps/*
+
+# A patched minimatch everywhere (GHSA-g3hv-75wg-m249, fixed in 11.0.1) until the tools that depend
+# on an older one (typescript-eslint, eslint) move to it themselves.
+overrides:
+  minimatch: ^11.0.8
+
+# Supply chain, checked on every install against the lockfile:
+# - a package whose new version lost the provenance or trusted publishing its earlier versions had is refused;
+# - a version published less than a day ago is not used, so a compromised release has time to be caught.
+trustPolicy: no-downgrade
+minimumReleaseAge: 1440

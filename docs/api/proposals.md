@@ -2,7 +2,7 @@
 
 The Proposal model: lifecycle and deadlines, applying and comparing changes, concurrent and parallel change detection, and refresh (rebase).
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 39 exports.
 

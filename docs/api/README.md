@@ -1,6 +1,6 @@
 # API reference
 
-Generated from the TypeScript sources by `npm run docs:api`; do not edit by hand.
+Generated from the TypeScript sources by `pnpm run docs:api`; do not edit by hand.
 
 - [@gantt/access](access.md): 17 exports
 - [@gantt/contract](contract.md): 24 exports
