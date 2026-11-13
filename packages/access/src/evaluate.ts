@@ -35,7 +35,7 @@ export class AccessEvaluator {
         const fn = this.conditions[r.condition];
         if (!fn || !fn({ ...ctx, subject: this.subject })) continue; // an unknown condition never matches
       }
-      if (r.effect === 'deny') { allow = false; this.store(key, false, cacheable); return false; }
+      if (r.effect === 'deny') { this.store(key, false, cacheable); return false; }
       allow = true;
     }
     this.store(key, allow, cacheable);
